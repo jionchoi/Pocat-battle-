@@ -1,0 +1,63 @@
+{
+  "expo": {
+    "name": "CatSnap",
+    "slug": "catsnap",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "catsnap",
+    "userInterfaceStyle": "light",
+    "icon": "./src/assets/icon.png",
+    "splash": {
+      "image": "./src/assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FBF8F4"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "app.catsnap.client",
+      "config": { "usesNonExemptEncryption": false },
+      "infoPlist": {
+        "NSCameraUsageDescription": "CatSnap uses your camera to spot cats and score the photos you take of them.",
+        "NSLocationWhenInUseUsageDescription": "CatSnap uses your location to show cat sightings nearby and to recognise the same cat on a later encounter.",
+        "NSPhotoLibraryAddUsageDescription": "CatSnap can save a photo you took to your library."
+      }
+    },
+    "android": {
+      "package": "app.catsnap.client",
+      "adaptiveIcon": {
+        "foregroundImage": "./src/assets/adaptive-icon.png",
+        "backgroundColor": "#FBF8F4"
+      },
+      "permissions": [
+        "CAMERA",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "VIBRATE"
+      ],
+      "config": {
+        "googleMaps": { "apiKey": "REPLACE_WITH_ANDROID_MAPS_KEY" }
+      }
+    },
+    "plugins": [
+      "expo-dev-client",
+      "expo-secure-store",
+      "expo-font",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "CatSnap uses your camera to spot cats and score the photos you take of them."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "CatSnap uses your location to show cat sightings nearby and to recognise the same cat on a later encounter."
+        }
+      ]
+    ],
+    "extra": {
+      "apiBaseUrl": "http://localhost:4000"
+    }
+  }
+}

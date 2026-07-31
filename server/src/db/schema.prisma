@@ -1,0 +1,466 @@
+// CatSnap database schema.
+//
+// Postgres, hosted on Supabase, used purely as a managed instance. Node is the only
+// client — the Supabase auto-generated API and Row Level Security are deliberately
+// unused, because Node owns all authorization (see README section 2a).
+//
+// ORM decision (README open item): Prisma over Drizzle. Both are fine here; Prisma wins
+// for a solo build on migration ergonomics and relation typing. The two raw-SQL escape
+// hatches we need (bbox viewport queries, leaderboard aggregation) are equally easy in
+// either, so the tie-breaker is day-to-day maintenance cost.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// Photo quality tier, derived from the composite score. Stored rather than computed on
+// read so the album can filter and index on it.
+enum Rarity {
+  Common
+  Rare
+  Epic
+  Legendary
+}
+
+// Pose/action classes the scoring pipeline recognises (README 9.2).
+enum PoseClass {
+  sitting
+  standing
+  walking
+  sleeping
+  grooming
+  stretching
+  yawning
+  jumping
+  pouncing
+  loafing
+  unknown
+}
+
+enum Reaction {
+  laugh
+  love
+  wow
+}
+
+// How a challenge picks its winner (README 9.4).
+enum ChallengeJudging {
+  score
+  votes
+}
+
+enum AuthProvider {
+  email
+  google
+  apple
+}
+
+enum CosmeticKind {
+  filter
+  frame
+  theme
+  pro
+}
+
+model User {
+  id           String       @id @default(cuid())
+  username     String       @unique
+  email        String?      @unique
+  passwordHash String?
+  provider     AuthProvider @default(email)
+  providerSub  String?      @unique
+  avatarUrl    String       @default("")
+
+  // Progression is cosmetic only — rank never affects scoring (README section 1).
+  photographerRank Int @default(1)
+  photographerXp   Int @default(0)
+  // Cumulative instant score across every photo — the app's opinion of this player's
+  // work. Kept for display; it is deliberately NOT what rank is computed from.
+  lifetimeScore    Int @default(0)
+  // Cumulative reactions received across every photo — the community's opinion, and
+  // the dominant term in Photographer Rank.
+  votesReceived    Int @default(0)
+
+  proSubscriptionActive Boolean   @default(false)
+  proExpiresAt          DateTime?
+
+  // Coarse home location, used to scope the neighborhood leaderboard. Deliberately
+  // rounded before storage — see services/privacy.coarsen().
+  homeLat  Float?
+  homeLng  Float?
+  cityName String?
+
+  pushToken String?
+
+  // Opt-out switches surfaced on the Settings screen.
+  shareCapturesByDefault Boolean @default(false)
+  pushChallengeResults   Boolean @default(true)
+  pushVotes              Boolean @default(true)
+  pushNearbyRareCats     Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  photos           Photo[]
+  dexEntries       CatDexEntry[]
+  discoveredCats   Cat[]              @relation("catDiscoverer")
+  votes            Vote[]
+  photoViews       PhotoView[]
+  sightings        CatSighting[]
+  refreshTokens    RefreshToken[]
+  friendshipsSent  Friendship[]       @relation("friendshipRequester")
+  friendshipsRecvd Friendship[]       @relation("friendshipAddressee")
+  purchases        Purchase[]
+  cosmetics        OwnedCosmetic[]
+  xpEntries        XpLedgerEntry[]
+
+  @@index([lifetimeScore])
+  @@index([votesReceived])
+  @@index([homeLat, homeLng])
+  @@index([cityName])
+}
+
+model RefreshToken {
+  id String @id @default(cuid())
+
+  // Only a hash is stored. A database dump must not yield usable sessions.
+  tokenHash String    @unique
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+// A unique real-world cat. Global: one row per animal, shared by everyone who
+// photographs it. Per-player naming and counts live on CatDexEntry, so two players can
+// call the same cat different things.
+model Cat {
+  id String @id @default(cuid())
+
+  // Fingerprint used to recognise the same animal on a later encounter — a coarse
+  // location cell plus stable coat/breed labels. See services/catMatcher.ts.
+  identityKey String @unique
+
+  discoveredByUserId String
+  discoveredBy       User   @relation("catDiscoverer", fields: [discoveredByUserId], references: [id], onDelete: Cascade)
+
+  // Discoverer's name for the cat, used as the default before a player renames it.
+  defaultNickname String
+  breedGuess      String?
+  // Coat/pattern labels that drove the rarity score, kept so re-matching is comparable.
+  coatLabels      String[]
+  // Scarcity of this cat's coat/breed, 0-100. Stable per animal, so it is stored once
+  // here rather than recomputed on every photo.
+  rarityScore     Int      @default(0)
+
+  firstSeenLat Float
+  firstSeenLng Float
+
+  // Across all players — drives the "first to find this cat" bonus.
+  globalEncounterCount Int      @default(1)
+  lastSeenAt           DateTime @default(now())
+  createdAt            DateTime @default(now())
+
+  photos     Photo[]
+  dexEntries CatDexEntry[]
+
+  @@index([firstSeenLat, firstSeenLng])
+  @@index([discoveredByUserId])
+}
+
+// One player's relationship with one real cat — the Cat Dex row (README 9.3).
+model CatDexEntry {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  catId String
+  cat   Cat    @relation(fields: [catId], references: [id], onDelete: Cascade)
+
+  // Player-editable. Null falls back to Cat.defaultNickname.
+  nickname String?
+  bio      String?
+
+  // Best photo this player has of this cat; updated when a new shot beats it.
+  bestPhotoId    String?
+  bestPhotoScore Int     @default(0)
+  bestTier       Rarity  @default(Common)
+
+  encounterCount Int      @default(1)
+  firstSeenAt    DateTime @default(now())
+  lastSeenAt     DateTime @default(now())
+
+  @@unique([userId, catId])
+  @@index([userId, lastSeenAt])
+  @@index([catId])
+}
+
+model Photo {
+  id String @id @default(cuid())
+
+  ownerId String
+  owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  catId String
+  cat   Cat    @relation(fields: [catId], references: [id], onDelete: Cascade)
+
+  imageUrl String
+  // Storage object path, kept so a delete can remove the blob and not just the row.
+  storagePath String
+  caption     String?
+
+  // Score components (README 9.2). Each 0-100 except bonus, which is a small additive.
+  composition Int
+  poseRarity  Int
+  catRarity   Int
+  bonus       Int
+  total       Int
+
+  tier   Rarity
+  pose   PoseClass @default(unknown)
+  badges String[]
+
+  capturedAt  DateTime @default(now())
+  capturedLat Float
+  capturedLng Float
+
+  // Reaction tallies, denormalised from Vote so the feed does not aggregate per row.
+  voteCount  Int @default(0)
+  laughCount Int @default(0)
+  loveCount  Int @default(0)
+  wowCount   Int @default(0)
+
+  // Unique viewers who actually saw this photo in a feed. The denominator of the
+  // engagement ratio — see PhotoView for why this is uniques and not impressions.
+  viewCount Int @default(0)
+
+  // Bayesian-smoothed engagement ratio, stored ×1000 as an integer so it can be
+  // indexed and sorted. This is the community's verdict, and it — not `total` — is
+  // what drives Photographer Rank and the leaderboards.
+  communityScore Int @default(0)
+
+  // Editorial boost for cold start. A brand-new app has no organic voting volume, so
+  // a light curation pass seeds the feed until it is self-sustaining.
+  featured   Boolean   @default(false)
+  featuredAt DateTime?
+
+  submittedToChallengeId String?
+  submittedToChallenge   Challenge? @relation("challengeSubmissions", fields: [submittedToChallengeId], references: [id], onDelete: SetNull)
+
+  // Sharing is opt-in — a photo is private to the album until the owner shares it
+  // (README 9.5: "opt-in, not forced social pressure").
+  sharedToFeed Boolean @default(false)
+  // Pinned to the player's public profile showcase.
+  showcased    Boolean @default(false)
+
+  // Vision labels retained for re-matching a cat on a later encounter.
+  visionLabels String[]
+
+  votes        Vote[]
+  views        PhotoView[]
+  wonChallenge Challenge? @relation("challengeWinner")
+
+  @@index([ownerId, capturedAt])
+  @@index([ownerId, total])
+  @@index([ownerId, tier])
+  @@index([catId])
+  @@index([submittedToChallengeId])
+  // Serves the community feed, which reads shared photos newest-first.
+  @@index([sharedToFeed, capturedAt])
+  // Serves community-score ranking and vote-judged challenges.
+  @@index([sharedToFeed, communityScore])
+  // Serves the featured rail at the top of the feed's first page.
+  @@index([featured, featuredAt])
+}
+
+/// One unique viewer of one photo.
+///
+/// A row rather than a bare counter because the engagement ratio is only fair if the
+/// denominator is *unique viewers*. Counting raw impressions would let a user scrolling
+/// back and forth silently depress someone else's score, which is the opposite of what
+/// the ratio is for. The unique constraint makes that impossible rather than unlikely.
+model PhotoView {
+  id String @id @default(cuid())
+
+  photoId String
+  photo   Photo  @relation(fields: [photoId], references: [id], onDelete: Cascade)
+
+  viewerId String
+  viewer   User   @relation(fields: [viewerId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([photoId, viewerId])
+  @@index([viewerId, createdAt])
+}
+
+model Challenge {
+  id   String @id @default(cuid())
+  slug String @unique
+
+  title  String
+  prompt String
+
+  judging ChallengeJudging @default(score)
+
+  startsAt DateTime
+  endsAt   DateTime
+
+  winningPhotoId String? @unique
+  winningPhoto   Photo?  @relation("challengeWinner", fields: [winningPhotoId], references: [id], onDelete: SetNull)
+
+  // Set by the rotation job when the winner is picked, so it cannot be scored twice.
+  closedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  submissions Photo[] @relation("challengeSubmissions")
+
+  @@index([startsAt, endsAt])
+}
+
+model Vote {
+  id String @id @default(cuid())
+
+  photoId String
+  photo   Photo  @relation(fields: [photoId], references: [id], onDelete: Cascade)
+
+  voterId String
+  voter   User   @relation(fields: [voterId], references: [id], onDelete: Cascade)
+
+  reaction Reaction
+
+  createdAt DateTime @default(now())
+
+  // One reaction per player per photo. Changing it updates the row rather than adding
+  // a second — reaction counts must not be inflatable by tapping every option.
+  @@unique([photoId, voterId])
+  @@index([photoId])
+  @@index([voterId])
+}
+
+model CatSighting {
+  id String @id @default(cuid())
+
+  reportedByUserId String
+  reportedBy       User   @relation(fields: [reportedByUserId], references: [id], onDelete: Cascade)
+
+  lat Float
+  lng Float
+
+  photoUrl String
+  verified Boolean @default(false)
+
+  // Independent corroborating reports. `verified` flips at >= 1 (README 9.6).
+  corroborationCount Int @default(0)
+
+  createdAt DateTime @default(now())
+  // Set on write to createdAt + MAP_CONFIG.sightingTtlHours so the cleanup job can
+  // index-scan instead of computing an interval per row.
+  expiresAt DateTime
+
+  @@index([lat, lng])
+  @@index([expiresAt])
+  @@index([reportedByUserId])
+}
+
+model Friendship {
+  id String @id @default(cuid())
+
+  requesterId String
+  requester   User   @relation("friendshipRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+
+  addresseeId String
+  addressee   User   @relation("friendshipAddressee", fields: [addresseeId], references: [id], onDelete: Cascade)
+
+  accepted  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@unique([requesterId, addresseeId])
+  @@index([addresseeId, accepted])
+}
+
+model Purchase {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  productId String
+  platform  String
+
+  // Unique so a replayed receipt cannot grant an item twice.
+  transactionId String @unique
+
+  validated Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// Cosmetics the player owns — camera filters, frame styles, gallery themes.
+model OwnedCosmetic {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  itemId String
+  kind   CosmeticKind
+
+  acquiredAt DateTime @default(now())
+
+  @@unique([userId, itemId])
+  @@index([userId])
+}
+
+// Append-only XP log. The balance lives on User for read speed; this exists so a
+// disputed rank can be reconstructed and score farming can be spotted.
+model XpLedgerEntry {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  delta  Int
+  reason String
+  refId  String?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+// Precomputed leaderboard rows. Section 2a: aggregation is a scheduled job, never
+// computed live per request.
+model LeaderboardSnapshot {
+  id String @id @default(cuid())
+
+  scope  String
+  metric String
+  // Neighborhood buckets are a rounded lat/lng cell; city is a name; global is a
+  // constant; friends is computed per-user at read time and never stored here.
+  bucket String
+
+  userId      String
+  username    String
+  avatarUrl   String
+  value       Int
+  rank        Int
+  topPhotoUrl String?
+
+  computedAt DateTime @default(now())
+
+  @@unique([scope, metric, bucket, userId])
+  @@index([scope, metric, bucket, rank])
+}

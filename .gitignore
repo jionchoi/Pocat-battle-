@@ -1,0 +1,23 @@
+node_modules/
+.expo/
+dist/
+web-build/
+*.log
+
+# Secrets. server/.env.example is the committed template.
+.env
+.env.local
+server/.env
+server/dist/
+
+# Generated Prisma client
+server/node_modules/.prisma/
+
+# Font files are downloaded from Fontshare, not vendored — see DESIGN.md section 8.
+src/assets/fonts/*.otf
+src/assets/fonts/*.ttf
+
+.DS_Store
+*.pem
+ios/
+android/
