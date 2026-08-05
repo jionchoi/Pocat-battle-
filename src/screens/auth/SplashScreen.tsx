@@ -11,33 +11,27 @@ import Animated, {
 import { PawPrint } from 'phosphor-react-native';
 
 import {
-  bone,
-  fern,
+  paper,
+  marmalade,
   radii,
   spacing,
   spring,
   text,
   useReduceMotion,
 } from '../../theme';
-import { useAuthStore } from '../../store/authStore';
 
 /**
- * Splash. Restores the session, then the root navigator swaps stacks on `status`.
+ * Splash. Shown while the session is restored; RootNavigator swaps it out on `status`.
  *
- * This screen does not navigate. It reports readiness and lets RootNavigator decide, which
- * avoids the classic double-navigation race where both the splash and the navigator try to
- * route at once.
+ * Purely presentational — it neither hydrates nor navigates. App owns the hydrate call so
+ * it runs whether or not this screen is mounted, and the navigator owns the swap, which
+ * avoids the classic race where both the splash and the navigator try to route at once.
  */
 export function SplashScreen() {
-  const hydrate = useAuthStore((s) => s.hydrate);
   const reduceMotion = useReduceMotion();
 
   const mark = useSharedValue(0);
   const wordmark = useSharedValue(0);
-
-  useEffect(() => {
-    void hydrate();
-  }, [hydrate]);
 
   useEffect(() => {
     if (reduceMotion) {
@@ -69,7 +63,7 @@ export function SplashScreen() {
   return (
     <View style={styles.root}>
       <Animated.View style={[styles.mark, markStyle]}>
-        <PawPrint size={40} color={fern[600]} weight="fill" />
+        <PawPrint size={40} color={marmalade[600]} weight="fill" />
       </Animated.View>
 
       <Animated.View style={wordStyle}>
@@ -85,7 +79,7 @@ export function SplashScreen() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: bone.bg,
+    backgroundColor: paper.bg,
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.lg,
@@ -94,16 +88,16 @@ const styles = StyleSheet.create({
     width: 84,
     height: 84,
     borderRadius: radii.xxl,
-    backgroundColor: fern[100],
+    backgroundColor: marmalade[100],
     alignItems: 'center',
     justifyContent: 'center',
   },
   title: {
-    color: bone.text,
+    color: paper.text,
     textAlign: 'center',
   },
   tagline: {
-    color: bone.textMuted,
+    color: paper.textMuted,
     textAlign: 'center',
     marginTop: spacing.xxs,
   },

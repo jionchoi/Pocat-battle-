@@ -10,10 +10,10 @@ import { Card } from '../../components/Card';
 import { EmptyState, InlineError } from '../../components/EmptyState';
 import { PhotoCard } from '../../components/PhotoCard';
 import { RankChip } from '../../components/LeaderboardRow';
-import { Screen, SectionHeader } from '../../components/Screen';
+import { BackButton, Screen, SectionHeader } from '../../components/Screen';
 import { SkeletonBlock } from '../../components/Skeleton';
 import type { PublicProfile } from '../../models';
-import { bone, layout, radii, spacing, text } from '../../theme';
+import { paper, layout, radii, spacing, text } from '../../theme';
 import type { ChallengesStackParamList } from '../../navigation/types';
 import { compactNumber, relativeTime } from '../../utils/format';
 
@@ -109,14 +109,18 @@ export function PublicProfileScreen({ navigation, route }: Props) {
         />
       ) : null}
 
+      {/* This screen leads with an avatar rather than a title, so it cannot inherit its
+          chevron from ScreenHeader. */}
+      <BackButton style={styles.back} />
+
       <View style={styles.head}>
         <Avatar uri={profile.user.avatarUrl} name={profile.user.username} size={72} />
 
         <View style={styles.headBody}>
-          <Text style={[text.h1, { color: bone.text }]} numberOfLines={1}>
+          <Text style={[text.h1, { color: paper.text }]} numberOfLines={1}>
             {profile.user.username}
           </Text>
-          <Text style={[text.bodySm, { color: bone.textMuted }]}>
+          <Text style={[text.bodySm, { color: paper.textMuted }]}>
             {`Joined ${relativeTime(profile.user.createdAt)}`}
           </Text>
           {profile.user.proSubscriptionActive ? (
@@ -145,7 +149,7 @@ export function PublicProfileScreen({ navigation, route }: Props) {
 
       {profile.showcasePhotos.length === 0 ? (
         <Card>
-          <Text style={[text.body, { color: bone.textMuted }]}>Nothing on show yet.</Text>
+          <Text style={[text.body, { color: paper.textMuted }]}>Nothing on show yet.</Text>
         </Card>
       ) : (
         <View style={styles.grid}>
@@ -175,8 +179,8 @@ const StatHeadline = React.memo(function StatHeadline({
 }) {
   return (
     <View style={styles.stat}>
-      <Text style={[text.statLg, { color: bone.text }]}>{compactNumber(value)}</Text>
-      <Text style={[text.caption, { color: bone.textMuted }]}>{label}</Text>
+      <Text style={[text.statLg, { color: paper.text }]}>{compactNumber(value)}</Text>
+      <Text style={[text.caption, { color: paper.textMuted }]}>{label}</Text>
     </View>
   );
 });
@@ -187,6 +191,9 @@ const styles = StyleSheet.create({
   },
   skeleton: {
     marginTop: spacing.sm,
+  },
+  back: {
+    marginBottom: spacing.xs,
   },
   head: {
     flexDirection: 'row',

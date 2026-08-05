@@ -16,7 +16,7 @@ import type {
   LeaderboardMetric,
   LeaderboardScope,
 } from '../../models';
-import { bone, fern, radii, spacing, text } from '../../theme';
+import { paper, marmalade, radii, spacing, text } from '../../theme';
 import { relativeTime } from '../../utils/format';
 
 /**
@@ -102,7 +102,7 @@ export function LeaderboardScreen({ navigation }: Props) {
         <RefreshControl
           refreshing={refreshing}
           onRefresh={() => void fetchBoard(true)}
-          tintColor={fern[600]}
+          tintColor={marmalade[600]}
         />
       }
     >
@@ -171,7 +171,7 @@ export function LeaderboardScreen({ navigation }: Props) {
                 index > 0
                   ? {
                       borderTopWidth: StyleSheet.hairlineWidth,
-                      borderTopColor: bone.hairline,
+                      borderTopColor: paper.hairline,
                     }
                   : undefined
               }
@@ -220,12 +220,12 @@ export const SegmentRow = React.memo(function SegmentRow({
             style={[
               styles.segment,
               {
-                backgroundColor: active ? fern[100] : bone.sunken,
-                borderColor: active ? fern[600] : 'transparent',
+                backgroundColor: active ? marmalade[100] : paper.sunken,
+                borderColor: active ? marmalade[600] : 'transparent',
               },
             ]}
           >
-            <Text style={[text.bodySm, { color: active ? fern[700] : bone.textMuted }]}>
+            <Text style={[text.bodySm, { color: active ? marmalade[700] : paper.textMuted }]}>
               {option.label}
             </Text>
           </Pressable>

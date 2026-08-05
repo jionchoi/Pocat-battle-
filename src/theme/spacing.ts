@@ -36,10 +36,20 @@ export const layout = {
   gridGap: spacing.sm,
   /** Floating tab bar: inset from each side edge. */
   tabBarInset: spacing.md,
-  /** Floating tab bar: lift above the safe-area inset. */
-  tabBarLift: spacing.xs,
-  /** Bottom padding added to scroll content so the floating bar never covers a row. */
-  tabBarClearance: 96,
+  /**
+   * Floating tab bar: lift above the safe-area inset.
+   *
+   * Small but not zero. The bar is a detached pill, and a pill resting on the safe-area
+   * line reads as a bar glued to the screen edge with its corners rounded — the thing the
+   * floating treatment exists to avoid.
+   */
+  tabBarLift: spacing.hair,
+  /**
+   * Bottom padding added to scroll content so the floating bar never covers a row.
+   * Clears the whole assembly, shutter included — the shutter breaks out of the pill's
+   * top edge, so clearing only the pill would leave the last card half under a coral disc.
+   */
+  tabBarClearance: 116,
   /** Minimum touch target, including map pins. */
   minTouch: 44,
   /**

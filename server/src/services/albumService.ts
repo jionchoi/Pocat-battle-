@@ -5,6 +5,7 @@ import { errors } from '../errors';
 import { ALBUM_CONFIG } from '../game/rules';
 import { deleteStoredPhoto } from '../integrations/storage';
 import { logger } from '../logger';
+import { rerank, unrank } from './viralService';
 
 /**
  * Photo Album and Cat Dex reads (README sections 5.3 and 9.3).
@@ -120,7 +121,7 @@ export async function updatePhoto(params: {
     }
   }
 
-  return prisma.photo.update({
+  const updated = await prisma.photo.update({
     where: { id: photo.id },
     data: {
       ...(params.caption !== undefined ? { caption: params.caption.trim() || null } : {}),
@@ -129,6 +130,26 @@ export async function updatePhoto(params: {
     },
     include: { cat: true, votes: { where: { voterId: params.ownerId } } },
   });
+
+  // Sharing is what puts a photo in front of the ranking, and un-sharing has to take it
+  // straight back out — a cached page rebuilt from a stale ZSET would keep serving a photo
+  // its owner just made private, which is the one cache-staleness bug that is not
+  // cosmetic.
+  if (params.sharedToFeed !== undefined) {
+    if (params.sharedToFeed) {
+      await rerank({
+        photoId: updated.id,
+        capturedAt: updated.capturedAt,
+        reactions: updated.laughCount + updated.loveCount + updated.wowCount,
+        views: updated.viewCount,
+        communityScore: updated.communityScore,
+      });
+    } else {
+      await unrank(updated.id);
+    }
+  }
+
+  return updated;
 }
 
 /**
@@ -140,6 +161,10 @@ export async function updatePhoto(params: {
  */
 export async function deletePhoto(photoId: string, ownerId: string): Promise<void> {
   const photo = await getPhotoForOwner(photoId, ownerId);
+
+  // Before the row goes, so a concurrent page rebuild cannot re-add it from a read that
+  // raced the delete.
+  await unrank(photo.id);
 
   await prisma.$transaction(async (tx) => {
     await tx.photo.delete({ where: { id: photo.id } });

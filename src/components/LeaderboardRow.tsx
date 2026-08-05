@@ -6,7 +6,7 @@ import type { LeaderboardEntry, LeaderboardMetric } from '../models';
 import { rankTitle } from '../constants/game';
 import {
   contextColors,
-  fern,
+  marmalade,
   radii,
   spacing,
   text,
@@ -39,7 +39,7 @@ export const LeaderboardRow = React.memo(function LeaderboardRow({
   entry,
   metric,
   onPress,
-  context = 'bone',
+  context = 'paper',
   style,
 }: {
   entry: LeaderboardEntry;
@@ -61,7 +61,7 @@ export const LeaderboardRow = React.memo(function LeaderboardRow({
         styles.row,
         // The player's own row is tinted rather than boxed — enough to find at a glance
         // while scrolling, without breaking the list into cards.
-        entry.isSelf ? { backgroundColor: fern[100] } : null,
+        entry.isSelf ? { backgroundColor: marmalade[100] } : null,
         style,
       ]}
     >
@@ -95,7 +95,7 @@ export const LeaderboardRow = React.memo(function LeaderboardRow({
 /** Compact rank + title chip, used on profiles. */
 export const RankChip = React.memo(function RankChip({
   rank,
-  context = 'bone',
+  context = 'paper',
 }: {
   rank: number;
   context?: ContextName;

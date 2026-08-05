@@ -5,7 +5,7 @@ import { Check } from 'phosphor-react-native';
 import { ALBUM_CONFIG } from '../constants/game';
 import {
   contextColors,
-  fern,
+  marmalade,
   icon,
   spacing,
   text,
@@ -41,7 +41,7 @@ export const ProUpsell = React.memo(function ProUpsell({
   photoLimit,
   /** True when the player is already blocked, rather than merely close to the cap. */
   blocked = false,
-  context = 'bone',
+  context = 'paper',
 }: {
   visible: boolean;
   onClose: () => void;
@@ -69,7 +69,7 @@ export const ProUpsell = React.memo(function ProUpsell({
       <View style={styles.benefits}>
         {BENEFITS.map((benefit) => (
           <View key={benefit} style={styles.benefit}>
-            <Check size={icon.size.sm} color={fern[600]} weight={icon.weightActive} />
+            <Check size={icon.size.sm} color={marmalade[600]} weight={icon.weightActive} />
             <Text style={[text.bodySm, { color: c.text }]}>{benefit}</Text>
           </View>
         ))}

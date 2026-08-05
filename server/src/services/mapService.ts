@@ -42,27 +42,42 @@ export function parseBbox(raw: unknown): BoundingBox {
   return { minLat, maxLat, minLng, maxLng };
 }
 
+/**
+ * Sightings inside a viewport.
+ *
+ * Raw SQL for the same reason the user search is: to hit an index that Prisma's query
+ * builder cannot express.
+ *
+ * Two independent range predicates (`lat BETWEEN ... AND lng BETWEEN ...`) against two
+ * single-column B-trees force Postgres to choose one of them, walk every row in that
+ * latitude band, and re-check the longitude by hand. In a dense city that band is most of
+ * the table, and the map fires this on every pan.
+ *
+ * `point(lng, lat) <@ box(...)` is a single two-dimensional containment lookup against the
+ * GiST index, which is what a viewport query actually is.
+ */
 export async function sightingsInBox(box: BoundingBox) {
-  const now = new Date();
-
-  return prisma.catSighting.findMany({
-    where: {
-      lat: { gte: box.minLat, lte: box.maxLat },
-      lng: { gte: box.minLng, lte: box.maxLng },
-      expiresAt: { gt: now },
-    },
-    orderBy: { createdAt: 'desc' },
-    take: MAP_CONFIG.maxViewportResults,
-    select: {
-      id: true,
-      reportedByUserId: true,
-      lat: true,
-      lng: true,
-      photoUrl: true,
-      verified: true,
-      createdAt: true,
-    },
-  });
+  return prisma.$queryRaw<
+    {
+      id: string;
+      reportedByUserId: string;
+      lat: number;
+      lng: number;
+      photoUrl: string;
+      verified: boolean;
+      createdAt: Date;
+    }[]
+  >`
+    SELECT "id", "reportedByUserId", "lat", "lng", "photoUrl", "verified", "createdAt"
+    FROM "CatSighting"
+    WHERE point("lng", "lat") <@ box(
+            point(${box.minLng}, ${box.minLat}),
+            point(${box.maxLng}, ${box.maxLat})
+          )
+      AND "expiresAt" > NOW()
+    ORDER BY "createdAt" DESC
+    LIMIT ${MAP_CONFIG.maxViewportResults}
+  `;
 }
 
 /**

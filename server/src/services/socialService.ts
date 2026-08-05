@@ -49,14 +49,31 @@ export async function searchUsers(params: { query: string; excludeUserId: string
     throw errors.badRequest('Search needs at least two characters.');
   }
 
-  return prisma.user.findMany({
-    where: {
-      username: { contains: query, mode: 'insensitive' },
-      id: { not: params.excludeUserId },
-    },
-    take: 20,
-    select: { id: true, username: true, avatarUrl: true, photographerRank: true },
-  });
+  /**
+   * Raw SQL rather than `contains: { mode: 'insensitive' }`, and the difference is a table
+   * scan.
+   *
+   * Prisma renders that filter as `username ILIKE '%q%'` against the bare column. The
+   * trigram index is built on `lower("username")`, and Postgres only uses an expression
+   * index when the query contains that exact expression — so the Prisma version reads and
+   * lowercases every row in "User" while someone is mid-keystroke. Spelling the predicate
+   * as `lower("username") LIKE ...` is what lets the GIN index answer it.
+   *
+   * The `%` wrapping is applied to the parameter, never by string concatenation, so a
+   * username containing `%` or `_` is matched literally and there is no injection surface.
+   */
+  const pattern = `%${query.toLowerCase().replace(/[%_\\]/g, '\\$&')}%`;
+
+  return prisma.$queryRaw<
+    { id: string; username: string; avatarUrl: string | null; photographerRank: number }[]
+  >`
+    SELECT "id", "username", "avatarUrl", "photographerRank"
+    FROM "User"
+    WHERE lower("username") LIKE ${pattern}
+      AND "id" <> ${params.excludeUserId}
+    ORDER BY length("username"), "username"
+    LIMIT 20
+  `;
 }
 
 export async function requestFriend(params: {

@@ -196,6 +196,10 @@ curl -s localhost:4000/health
 
 ## When something looks broken
 
+**`P1001 Can't reach database server` on a Supabase URL.** The direct host
+(`db.<ref>.supabase.co`) is IPv6-only without the paid add-on. Use the Session pooler
+string instead — see SETUP.md section 4.1.
+
 **The countdown never starts.** The detector needs ~12 consecutive stable frames. Point at
 something textured — a blank wall will never trigger it.
 

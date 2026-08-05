@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 
@@ -7,6 +7,7 @@ import type {
   AlbumStackParamList,
   AuthStackParamList,
   ChallengesStackParamList,
+  HomeStackParamList,
   MainTabParamList,
   MapStackParamList,
   ProfileStackParamList,
@@ -17,6 +18,8 @@ import { SplashScreen } from '../screens/auth/SplashScreen';
 import { OnboardingScreen } from '../screens/auth/OnboardingScreen';
 import { SignInSignUpScreen } from '../screens/auth/SignInSignUpScreen';
 import { UsernameSetupScreen } from '../screens/auth/UsernameSetupScreen';
+
+import { ViralFeedScreen } from '../screens/home/ViralFeedScreen';
 
 import { MapScreen } from '../screens/map/MapScreen';
 import { CaptureScreen } from '../screens/map/CaptureScreen';
@@ -64,11 +67,22 @@ const Auth = createNativeStackNavigator<AuthStackParamList>();
 function AuthStack() {
   return (
     <Auth.Navigator screenOptions={commonStackOptions}>
-      <Auth.Screen name="Splash" component={SplashScreen} />
       <Auth.Screen name="Onboarding" component={OnboardingScreen} />
       <Auth.Screen name="SignInSignUp" component={SignInSignUpScreen} />
-      <Auth.Screen name="UsernameSetup" component={UsernameSetupScreen} />
     </Auth.Navigator>
+  );
+}
+
+const HomeNav = createNativeStackNavigator<HomeStackParamList>();
+
+function HomeStack() {
+  return (
+    <HomeNav.Navigator screenOptions={commonStackOptions}>
+      <HomeNav.Screen name="ViralFeed" component={ViralFeedScreen} />
+      <HomeNav.Screen name="PhotoDetail" component={PhotoDetailScreen} />
+      <HomeNav.Screen name="CatProfile" component={CatProfileScreen} />
+      <HomeNav.Screen name="PublicProfile" component={PublicProfileScreen} />
+    </HomeNav.Navigator>
   );
 }
 
@@ -151,8 +165,9 @@ function MainTabs() {
       // The floating glass pill from DESIGN.md section 5, not an edge-to-edge bar.
       tabBar={(props) => <FloatingTabBar {...props} />}
       screenOptions={{ headerShown: false }}
-      initialRouteName="MapTab"
+      initialRouteName="HomeTab"
     >
+      <Tabs.Screen name="HomeTab" component={HomeStack} />
       <Tabs.Screen name="MapTab" component={MapStack} />
       <Tabs.Screen name="AlbumTab" component={AlbumStack} />
       <Tabs.Screen name="ChallengesTab" component={ChallengesStack} />
@@ -166,24 +181,50 @@ function MainTabs() {
 const Root = createNativeStackNavigator<RootStackParamList>();
 
 /**
+ * How long the splash stays up at minimum. Session restore usually finishes in well under
+ * this, and swapping it out after 40ms reads as a flicker rather than an opening.
+ */
+const SPLASH_MIN_MS = 620;
+
+/**
  * Swaps stacks on auth status.
  *
  * Conditional rendering rather than imperative navigation: when the session ends —
  * including a failed token refresh deep in a request — the tree changes and React
  * Navigation resets cleanly. Screens never have to route on sign-out themselves.
+ *
+ * The splash lives here rather than at the top of the auth stack. Inside that stack it
+ * would be the landing screen for every signed-out launch with nothing to move off it,
+ * and it belongs to session restore anyway — a state both branches pass through.
  */
 export function RootNavigator() {
   const status = useAuthStore((s) => s.status);
+  // Empty until the player picks one, so it doubles as "this account is not set up yet".
+  // Requires a loaded profile: launching offline keeps the session but leaves `user` null,
+  // and an established account must not be dropped into setup just because /me failed.
+  const needsSetup = useAuthStore((s) => s.user !== null && !s.user.avatarUrl);
+  const [minimumElapsed, setMinimumElapsed] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setMinimumElapsed(true), SPLASH_MIN_MS);
+    return () => clearTimeout(timer);
+  }, []);
 
   return (
     <Root.Navigator screenOptions={{ headerShown: false }}>
-      {status === 'authenticated' ? (
+      {status === 'loading' || !minimumElapsed ? (
+        <Root.Screen name="Splash" component={SplashScreen} />
+      ) : status !== 'authenticated' ? (
+        <Root.Screen name="AuthStack" component={AuthStack} />
+      ) : needsSetup ? (
+        // Signing up authenticates immediately, which tears down the auth stack. Setup has
+        // to be its own branch here or the avatar step gets skipped entirely.
+        <Root.Screen name="UsernameSetup" component={UsernameSetupScreen} />
+      ) : (
         <>
           <Root.Screen name="MainTabs" component={MainTabs} />
           <Root.Screen name="NotFound" component={NotFoundScreen} />
         </>
-      ) : (
-        <Root.Screen name="AuthStack" component={AuthStack} />
       )}
     </Root.Navigator>
   );

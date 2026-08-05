@@ -1,15 +1,24 @@
 import React, { useCallback, useEffect, useMemo } from 'react';
-import { FlatList, RefreshControl, StyleSheet, View, useWindowDimensions } from 'react-native';
+import {
+  FlatList,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import { PawPrint } from 'phosphor-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
+import { RarityChip } from '../../components/Badge';
 import { CatDexEntry } from '../../components/CatDexEntry';
 import { EmptyState } from '../../components/EmptyState';
 import { Screen, ScreenHeader } from '../../components/Screen';
 import { PhotoCardSkeleton } from '../../components/Skeleton';
-import type { Cat } from '../../models';
+import { RARITIES } from '../../constants/game';
+import type { Cat, Rarity } from '../../models';
 import { useAlbumStore } from '../../store/albumStore';
-import { layout, spacing } from '../../theme';
+import { layout, paper, spacing, text } from '../../theme';
 import type { AlbumStackParamList } from '../../navigation/types';
 import { pluralize } from '../../utils/format';
 
@@ -55,6 +64,22 @@ export function CatDexScreen({ navigation }: Props) {
 
   const discovered = cats.filter((cat) => cat.discoveredByMe).length;
 
+  /**
+   * Tier counts, best-first.
+   *
+   * Reversed against `RARITIES` deliberately: the collection's value is at the top of the
+   * ramp, so the Legendary count leads the row. Reading Common-first would put the least
+   * interesting number where the eye lands.
+   */
+  const byTier = useMemo(() => {
+    const counts = { Common: 0, Rare: 0, Epic: 0, Legendary: 0 } as Record<Rarity, number>;
+    for (const cat of cats) counts[cat.bestTier] += 1;
+    return [...RARITIES].reverse().filter((tier) => counts[tier] > 0).map((tier) => ({
+      tier,
+      count: counts[tier],
+    }));
+  }, [cats]);
+
   if (phase === 'loading') {
     return (
       <Screen padded={false}>
@@ -90,10 +115,23 @@ export function CatDexScreen({ navigation }: Props) {
   return (
     <Screen padded={false}>
       <View style={styles.header}>
-        <ScreenHeader
-          title="Cat Dex"
-          subtitle={`${pluralize(cats.length, 'cat')}, ${discovered} discovered by you`}
-        />
+        <ScreenHeader title="Cat Dex" style={styles.title} />
+        <Text style={[text.bodySm, styles.subtitle]}>
+          {`${pluralize(cats.length, 'cat')} spotted in your neighbourhood${
+            discovered > 0 ? ` · ${discovered} you found first` : ''
+          }`}
+        </Text>
+
+        {/*
+          The tier tally sits under the count rather than over the grid. It is a summary
+          of what is below, and a coloured row floating above an unrelated heading reads
+          as a filter bar — which it is not; these are not tappable.
+        */}
+        <View style={styles.tiers}>
+          {byTier.map(({ tier, count }) => (
+            <RarityChip key={tier} rarity={tier} count={count} />
+          ))}
+        </View>
       </View>
 
       <FlatList
@@ -118,6 +156,19 @@ export function CatDexScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   header: {
     paddingHorizontal: layout.gutter,
+  },
+  title: {
+    paddingBottom: 0,
+  },
+  subtitle: {
+    marginTop: spacing.xxs,
+    color: paper.textSubtle,
+  },
+  tiers: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: spacing.sm,
   },
   grid: {
     paddingHorizontal: layout.gutter,

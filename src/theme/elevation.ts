@@ -1,17 +1,19 @@
 import { Platform, ViewStyle } from 'react-native';
-import { shadowTint, type ContextName } from './colors';
+import { marmalade, shadowTint, type ContextName } from './colors';
 
 /**
  * Elevation.
  *
- * Generic black `box-shadow` is banned. Every shadow is tinted to its background hue and
- * spreads wide at low opacity — a diffusion shadow, not a drop shadow.
- *
  * Default is `flat`. A card is only allowed a shadow when elevation actually
  * communicates hierarchy; everything else groups with a hairline or with negative space.
+ * On a white page most cards are `hairline` — a shadow on every tile turns a grid into
+ * a pile of receipts.
+ *
+ * The two loud steps are reserved: `floating` for the tab bar, which genuinely hovers
+ * over scrolling content, and `modal` for sheets.
  */
 
-export type ElevationLevel = 'flat' | 'raised' | 'floating' | 'modal';
+export type ElevationLevel = 'flat' | 'hairline' | 'raised' | 'floating' | 'modal';
 
 interface ShadowSpec {
   offsetY: number;
@@ -22,14 +24,16 @@ interface ShadowSpec {
 }
 
 const specs: Record<ElevationLevel, ShadowSpec> = {
-  /** Hairline only. The default for list rows, stat blocks, settings groups. */
+  /** No shadow at all. The default for list rows, stat blocks, settings groups. */
   flat: { offsetY: 0, radius: 0, opacity: 0, android: 0 },
-  /** Collection cards, shop tiles. */
-  raised: { offsetY: 6, radius: 18, opacity: 0.06, android: 2 },
-  /** Floating tab bar, FAB, catch shutter. */
-  floating: { offsetY: 14, radius: 32, opacity: 0.1, android: 6 },
-  /** Bottom sheets, catch result card, level-up reveal. */
-  modal: { offsetY: 22, radius: 48, opacity: 0.14, android: 12 },
+  /** Barely there — separates a white card from a white page and nothing more. */
+  hairline: { offsetY: 1, radius: 2, opacity: 0.05, android: 1 },
+  /** Collection cards, shop tiles, the photo-detail sheet. */
+  raised: { offsetY: 6, radius: 16, opacity: 0.08, android: 3 },
+  /** Floating tab bar. */
+  floating: { offsetY: 12, radius: 24, opacity: 0.18, android: 8 },
+  /** Bottom sheets, the score reveal's primary action. */
+  modal: { offsetY: 20, radius: 40, opacity: 0.22, android: 14 },
 };
 
 /**
@@ -38,13 +42,13 @@ const specs: Record<ElevationLevel, ShadowSpec> = {
  */
 export function elevation(
   level: ElevationLevel,
-  context: ContextName = 'bone'
+  context: ContextName = 'paper'
 ): ViewStyle {
   const spec = specs[level];
   if (spec.opacity === 0) return {};
 
-  const tint = context === 'arena' ? shadowTint.arena : shadowTint.bone;
-  const opacity = context === 'arena' ? spec.opacity * 1.6 : spec.opacity;
+  const tint = context === 'arena' ? shadowTint.arena : shadowTint.paper;
+  const opacity = context === 'arena' ? Math.min(1, spec.opacity * 1.6) : spec.opacity;
 
   return Platform.select<ViewStyle>({
     ios: {
@@ -56,6 +60,34 @@ export function elevation(
     android: {
       elevation: spec.android,
       shadowColor: tint,
+    },
+    default: {},
+  }) as ViewStyle;
+}
+
+/**
+ * The accent's own coloured shadow, for the capture FAB and the reveal's primary action.
+ *
+ * A coral button dropping a neutral grey shadow looks unlit. Tinting the shadow to the
+ * button's own hue is what makes it read as emitting rather than merely sitting there —
+ * and it is the one place in the product a coloured shadow is allowed.
+ */
+export function accentGlow(strength: 'button' | 'fab' = 'button'): ViewStyle {
+  const spec =
+    strength === 'fab'
+      ? { offsetY: 8, radius: 12, opacity: 0.45, android: 10 }
+      : { offsetY: 10, radius: 16, opacity: 0.4, android: 10 };
+
+  return Platform.select<ViewStyle>({
+    ios: {
+      shadowColor: marmalade[600],
+      shadowOffset: { width: 0, height: spec.offsetY },
+      shadowRadius: spec.radius,
+      shadowOpacity: spec.opacity,
+    },
+    android: {
+      elevation: spec.android,
+      shadowColor: marmalade[600],
     },
     default: {},
   }) as ViewStyle;

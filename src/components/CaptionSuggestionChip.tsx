@@ -11,7 +11,7 @@ import Animated, {
 
 import {
   contextColors,
-  fern,
+  marmalade,
   press,
   radii,
   spacing,
@@ -35,7 +35,7 @@ export const CaptionSuggestionChip = React.memo(function CaptionSuggestionChip({
   selected,
   onPress,
   index = 0,
-  context = 'bone',
+  context = 'paper',
 }: {
   caption: string;
   selected: boolean;
@@ -86,13 +86,13 @@ export const CaptionSuggestionChip = React.memo(function CaptionSuggestionChip({
         style={[
           styles.chip,
           {
-            backgroundColor: selected ? fern[100] : c.sunken,
-            borderColor: selected ? fern[500] : c.hairline,
+            backgroundColor: selected ? marmalade[100] : c.sunken,
+            borderColor: selected ? marmalade[500] : c.hairline,
           },
         ]}
       >
         <Text
-          style={[text.bodySm, { color: selected ? fern[700] : c.text }]}
+          style={[text.bodySm, { color: selected ? marmalade[700] : c.text }]}
           numberOfLines={2}
         >
           {caption}
@@ -112,7 +112,7 @@ export const CaptionSuggestions = React.memo(function CaptionSuggestions({
   suggestions,
   selected,
   onSelect,
-  context = 'bone',
+  context = 'paper',
   style,
 }: {
   suggestions: string[];

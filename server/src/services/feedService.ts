@@ -2,11 +2,12 @@ import type { Prisma, Reaction } from '@prisma/client';
 
 import { prisma } from '../db/client';
 import { errors } from '../errors';
-import { COMMUNITY, XP, communityScore } from '../game/rules';
+import { COMMUNITY, XP } from '../game/rules';
 import { logger } from '../logger';
 import { notifyVoteReceived } from '../integrations/push';
 import { store } from '../redis';
 import { grantXp } from './progressionService';
+import { applyReactionDelta } from './viralService';
 
 /**
  * Community feed and reactions (README section 9.5).
@@ -25,73 +26,25 @@ export interface FeedQuery {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Impressions — the denominator of the engagement ratio                      */
+/* Impressions and ranking                                                    */
 /* -------------------------------------------------------------------------- */
 
 /**
- * Records that a viewer actually saw these photos.
+ * Both used to live here, and both now live in `viralService`.
  *
- * Reported by the client from `onViewableItemsChanged`, not from the feed response —
- * a photo returned in a page the player scrolled straight past was never really seen,
- * and counting it would depress its ratio for no reason.
+ * The old implementations were correct and unaffordable. `recordImpressions` wrote a row
+ * per (photo, viewer) and then recounted the photo from its join tables — roughly seventy
+ * queries for one scroll batch, on the highest-frequency action in the product. It is now
+ * one pipelined Redis round trip, reconciled to Postgres by a job.
  *
- * Deduped by the `(photoId, viewerId)` unique constraint, so re-scrolling a feed cannot
- * inflate the denominator. `skipDuplicates` makes that a single round trip instead of a
- * read-then-write race.
+ * The uniqueness that the `PhotoView` table provided is now a HyperLogLog. That is a real
+ * trade and worth naming: unique viewers become accurate to ~0.8% rather than exactly
+ * right. It buys a fixed 12KB per photo instead of unbounded row growth, and the number
+ * in question is the denominator of a ratio, not anything a person is paid on.
  *
- * A viewer's own photos are excluded: looking at your own work is not reach, and
- * counting it would let anyone tank their own ratio by admiring their photo.
+ * `PhotoView` is kept in the schema for audit and for exact recounts of individual photos
+ * during moderation, but nothing writes to it on the request path any more.
  */
-export async function recordImpressions(params: {
-  viewerId: string;
-  photoIds: string[];
-}): Promise<{ recorded: number }> {
-  const ids = [...new Set(params.photoIds)].slice(0, 100);
-  if (ids.length === 0) return { recorded: 0 };
-
-  const photos = await prisma.photo.findMany({
-    where: { id: { in: ids }, sharedToFeed: true, ownerId: { not: params.viewerId } },
-    select: { id: true },
-  });
-
-  if (photos.length === 0) return { recorded: 0 };
-
-  const created = await prisma.photoView.createMany({
-    data: photos.map((photo) => ({ photoId: photo.id, viewerId: params.viewerId })),
-    skipDuplicates: true,
-  });
-
-  if (created.count === 0) return { recorded: 0 };
-
-  // Only the genuinely new views need their counters moved. Which ids were new is not
-  // returned by createMany, so the affected photos are recounted from the source of
-  // truth — correct by construction, and bounded by the page size.
-  await Promise.all(photos.map((photo) => refreshCommunityScore(photo.id)));
-
-  return { recorded: created.count };
-}
-
-/**
- * Recomputes `viewCount`, `voteCount` and `communityScore` for one photo from its rows.
- *
- * Derived from the join tables rather than incremented in place: the denormalised
- * counters exist for read speed, and recomputing them is what stops a lost increment
- * from permanently skewing someone's rank.
- */
-export async function refreshCommunityScore(photoId: string): Promise<void> {
-  const [views, votes] = await Promise.all([
-    prisma.photoView.count({ where: { photoId } }),
-    prisma.vote.count({ where: { photoId } }),
-  ]);
-
-  await prisma.photo.update({
-    where: { id: photoId },
-    data: {
-      viewCount: views,
-      communityScore: communityScore({ votes, views }),
-    },
-  });
-}
 
 export async function listFeed(query: FeedQuery) {
   const where: Prisma.PhotoWhereInput = { sharedToFeed: true };
@@ -157,8 +110,22 @@ export async function listFeed(query: FeedQuery) {
  * Records or changes a reaction.
  *
  * Tapping a second reaction *replaces* the first rather than adding to it, and tapping
- * the same one again clears it. The per-reaction counters on Photo are maintained here
- * in the same transaction as the Vote row, so the denormalised tallies cannot drift.
+ * the same one again clears it. The `Vote` row is the source of truth for that rule and
+ * stays in Postgres, because uniqueness per (photo, voter) and the daily ceiling are both
+ * correctness properties that a cache must not own.
+ *
+ * ## What is deliberately *not* in the transaction any more
+ *
+ * The per-reaction tallies on `Photo` used to be incremented here, in the same transaction
+ * as the vote. That is the textbook hot-row problem: a photo going viral is by definition
+ * one row that thousands of concurrent transactions all want to write, and every one of
+ * them serialises behind the last. The photo that most needs to be fast is the one that
+ * locks hardest — throughput collapses exactly at the moment of success.
+ *
+ * Counters now go to Redis (`HINCRBY`, no cross-request contention) and reach the row
+ * through the flush job. The consequence is that `Photo.laughCount` trails by up to one
+ * flush interval, which is why every read path layers the live counters over the row
+ * rather than trusting it.
  */
 export async function react(params: {
   photoId: string;
@@ -172,7 +139,16 @@ export async function react(params: {
 }> {
   const photo = await prisma.photo.findUnique({
     where: { id: params.photoId },
-    select: { id: true, ownerId: true, sharedToFeed: true },
+    select: {
+      id: true,
+      ownerId: true,
+      sharedToFeed: true,
+      capturedAt: true,
+      laughCount: true,
+      loveCount: true,
+      wowCount: true,
+      viewCount: true,
+    },
   });
 
   if (!photo) throw errors.notFound('That photo no longer exists.');
@@ -189,6 +165,7 @@ export async function react(params: {
     });
 
     let myReaction: Reaction | null = params.reaction;
+    const deltas: Partial<Record<Reaction, number>> = {};
 
     if (!existing) {
       await tx.vote.create({
@@ -198,63 +175,48 @@ export async function react(params: {
           reaction: params.reaction,
         },
       });
-      await tx.photo.update({
-        where: { id: params.photoId },
-        data: { voteCount: { increment: 1 }, [counterFor(params.reaction)]: { increment: 1 } },
-      });
       await tx.user.update({
         where: { id: photo.ownerId },
         data: { votesReceived: { increment: 1 } },
       });
+      deltas[params.reaction] = 1;
     } else if (existing.reaction === params.reaction) {
       // Same reaction again — treat it as an undo.
       await tx.vote.delete({ where: { id: existing.id } });
-      await tx.photo.update({
-        where: { id: params.photoId },
-        data: { voteCount: { decrement: 1 }, [counterFor(params.reaction)]: { decrement: 1 } },
-      });
       // The owner keeps the XP. Clawing it back would let anyone knock a rival down a
       // rank by voting and immediately un-voting.
       await tx.user.update({
         where: { id: photo.ownerId },
         data: { votesReceived: { decrement: 1 } },
       });
+      deltas[params.reaction] = -1;
       myReaction = null;
     } else {
       await tx.vote.update({
         where: { id: existing.id },
         data: { reaction: params.reaction },
       });
-      // voteCount is unchanged — one player still counts once.
-      await tx.photo.update({
-        where: { id: params.photoId },
-        data: {
-          [counterFor(existing.reaction)]: { decrement: 1 },
-          [counterFor(params.reaction)]: { increment: 1 },
-        },
-      });
+      // The vote total is unchanged — one player still counts once — but which bucket it
+      // sits in moves.
+      deltas[existing.reaction] = -1;
+      deltas[params.reaction] = 1;
     }
 
-    const updated = await tx.photo.findUniqueOrThrow({
-      where: { id: params.photoId },
-      select: {
-        laughCount: true,
-        loveCount: true,
-        wowCount: true,
-        voteCount: true,
-        viewCount: true,
-      },
-    });
-
-    return { updated, myReaction, isNew: !existing };
+    return { myReaction, deltas, isNew: !existing };
   });
 
-  // The vote changed the numerator, so the community score has to move with it.
-  await refreshCommunityScore(params.photoId);
-
-  const scored = await prisma.photo.findUniqueOrThrow({
-    where: { id: params.photoId },
-    select: { communityScore: true, viewCount: true },
+  // Outside the transaction and outside Postgres: counters, community score and the
+  // photo's position in every ranking window, in one place.
+  const live = await applyReactionDelta({
+    photoId: params.photoId,
+    capturedAt: photo.capturedAt,
+    deltas: result.deltas,
+    fallback: {
+      laugh: photo.laughCount,
+      love: photo.loveCount,
+      wow: photo.wowCount,
+      views: photo.viewCount,
+    },
   });
 
   if (result.isNew) {
@@ -272,14 +234,10 @@ export async function react(params: {
   }
 
   return {
-    reactions: {
-      laugh: result.updated.laughCount,
-      love: result.updated.loveCount,
-      wow: result.updated.wowCount,
-    },
+    reactions: { laugh: live.laugh, love: live.love, wow: live.wow },
     myReaction: result.myReaction,
-    communityScore: scored.communityScore,
-    viewCount: scored.viewCount,
+    communityScore: live.communityScore,
+    viewCount: live.views,
   };
 }
 

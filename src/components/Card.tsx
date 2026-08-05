@@ -2,10 +2,8 @@ import React from 'react';
 import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import {
-  concentric,
   contextColors,
   elevation,
-  innerHighlight,
   radii,
   spacing,
   type ContextName,
@@ -17,9 +15,9 @@ export interface CardProps {
   context?: ContextName;
   /** Default is flat — a shadow is opt-in and only when elevation means something. */
   level?: ElevationLevel;
-  /** Outer shell tint, e.g. a rarity tint. Falls back to the sunken surface. */
+  /** Fill override, e.g. a rarity tint. Falls back to the soft well. */
   shellColor?: string;
-  /** Outer shell ring. Falls back to the context hairline. */
+  /** Optional hairline ring. Off by default — the fill already draws the boundary. */
   ringColor?: string;
   radius?: number;
   padding?: number;
@@ -27,57 +25,54 @@ export interface CardProps {
   contentStyle?: StyleProp<ViewStyle>;
 }
 
-const SHELL_PAD = 6;
-
 /**
- * Base surface using the Double-Bezel: an outer shell that reads as a machined tray, and
- * an inner core that reads as the plate sitting in it. Radii are concentric, so the two
- * curves agree at the corner.
+ * Base surface: a single soft well.
  *
- * The default is deliberately flat — most groupings in this app should be a hairline or
- * negative space, not another box with a shadow.
+ * This used to be a Double-Bezel — a tinted outer shell wrapping a lighter inner core,
+ * with concentric radii. That composition needs the page to be darker than the card, and
+ * the page is now white: the core became the same colour as the background behind it, so
+ * all the bezel rendered was a grey picture frame around nothing.
+ *
+ * One layer replaces it. The well is a shade off white, which is enough separation on a
+ * white page and reads as recessed rather than as another floating box — and it lets a
+ * card sit next to the reaction bars and dex rows that use the same fill without the two
+ * looking like different materials.
+ *
+ * The default is deliberately flat. Most groupings in this app should be a hairline or
+ * negative space; `level` is there for the few that genuinely float.
  */
 export const Card = React.memo(function Card({
   children,
-  context = 'bone',
+  context = 'paper',
   level = 'flat',
   shellColor,
   ringColor,
-  radius = radii.xl,
+  radius = radii.lg,
   padding = spacing.md,
   style,
   contentStyle,
 }: CardProps) {
   const c = contextColors(context);
+  const ring = ringColor ?? null;
 
   return (
     <View
       style={[
+        styles.card,
         {
-          backgroundColor: shellColor ?? c.sunken,
-          borderColor: ringColor ?? c.hairline,
+          backgroundColor: shellColor ?? c.sunkenSoft,
           borderRadius: radius,
-          borderWidth: 1,
-          padding: SHELL_PAD,
+          padding,
         },
+        // A ring is opt-in. On a well that is already distinguishable by fill, a hairline
+        // on top of it is a second statement of the same boundary.
+        ring ? { borderWidth: 1, borderColor: ring } : null,
         elevation(level, context),
         style,
+        contentStyle,
       ]}
     >
-      <View
-        style={[
-          styles.core,
-          {
-            backgroundColor: c.surface,
-            borderRadius: concentric(radius, SHELL_PAD),
-            padding,
-          },
-          innerHighlight(c.innerHighlight),
-          contentStyle,
-        ]}
-      >
-        {children}
-      </View>
+      {children}
     </View>
   );
 });
@@ -88,7 +83,7 @@ export const Card = React.memo(function Card({
  */
 export const DividedGroup = React.memo(function DividedGroup({
   children,
-  context = 'bone',
+  context = 'paper',
   style,
 }: {
   children: React.ReactNode;
@@ -117,7 +112,7 @@ export const DividedGroup = React.memo(function DividedGroup({
 });
 
 const styles = StyleSheet.create({
-  core: {
+  card: {
     overflow: 'hidden',
   },
 });

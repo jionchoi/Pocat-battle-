@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import MapView, { Marker, type Region } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Camera, Crosshair } from 'phosphor-react-native';
+import { Crosshair, type IconProps } from 'phosphor-react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -17,9 +17,9 @@ import { SelfMarker, SightingPin } from '../../components/MapPin';
 import type { MapStackParamList, MainTabParamList } from '../../navigation/types';
 import { MAP_CONFIG } from '../../constants/game';
 import {
-  bone,
+  paper,
   elevation,
-  fern,
+  marmalade,
   icon,
   innerHighlight,
   layout,
@@ -189,7 +189,7 @@ export function MapScreen({ navigation }: Props) {
       {empty && !error ? (
         <View style={[styles.emptySlot, { top: insets.top + 64 }]} pointerEvents="none">
           <View style={styles.emptyCard}>
-            <Text style={[text.bodySm, { color: bone.textMuted }]}>
+            <Text style={[text.bodySm, { color: paper.textMuted }]}>
               {layer === 'mine'
                 ? 'None of your photos were taken around here yet.'
                 : 'No sightings nearby. Log the first one.'}
@@ -198,18 +198,18 @@ export function MapScreen({ navigation }: Props) {
         </View>
       ) : null}
 
+      {/*
+        Recentre only. The capture shutter used to sit here too, but it is now the centre
+        of the tab bar — permanently on screen, a few points below this spot, in the same
+        colour. Two coral camera buttons within 60pt of each other read as two different
+        actions, and the player has to work out which.
+      */}
       <View style={[styles.controls, { bottom: layout.tabBarClearance + spacing.md }]}>
         <RoundControl
           label="Centre on me"
           onPress={recentre}
           Glyph={Crosshair}
           variant="secondary"
-        />
-        <RoundControl
-          label="Open the camera to photograph a cat"
-          onPress={() => navigation.navigate('Capture')}
-          Glyph={Camera}
-          variant="primary"
         />
       </View>
     </View>
@@ -229,7 +229,7 @@ const LayerToggle = React.memo(function LayerToggle({
   ];
 
   return (
-    <View style={[styles.toggle, innerHighlight(bone.innerHighlight)]}>
+    <View style={[styles.toggle, innerHighlight(paper.innerHighlight)]}>
       {options.map((option) => {
         const active = option.key === layer;
 
@@ -241,13 +241,13 @@ const LayerToggle = React.memo(function LayerToggle({
             accessibilityState={{ selected: active }}
             style={[
               styles.toggleItem,
-              active && { backgroundColor: fern[100] },
+              active && { backgroundColor: marmalade[100] },
             ]}
           >
             <Text
               style={[
                 text.bodySm,
-                { color: active ? fern[700] : bone.textMuted },
+                { color: active ? marmalade[700] : paper.textMuted },
               ]}
             >
               {option.label}
@@ -267,7 +267,7 @@ const RoundControl = React.memo(function RoundControl({
 }: {
   label: string;
   onPress: () => void;
-  Glyph: typeof Camera;
+  Glyph: React.ComponentType<IconProps>;
   variant: 'primary' | 'secondary';
 }) {
   const pressed = useSharedValue(0);
@@ -300,16 +300,16 @@ const RoundControl = React.memo(function RoundControl({
           {
             width: primary ? 64 : 48,
             height: primary ? 64 : 48,
-            backgroundColor: primary ? fern[600] : bone.surface,
-            borderColor: primary ? fern[700] : bone.hairlineHi,
+            backgroundColor: primary ? marmalade[600] : paper.surface,
+            borderColor: primary ? marmalade[700] : paper.hairlineHi,
           },
-          elevation('floating', 'bone'),
+          elevation('floating', 'paper'),
           animated,
         ]}
       >
         <Glyph
           size={primary ? 26 : 20}
-          color={primary ? '#FFFFFF' : bone.text}
+          color={primary ? '#FFFFFF' : paper.text}
           weight={primary ? icon.weightActive : icon.weightDefault}
         />
       </Animated.View>
@@ -320,7 +320,7 @@ const RoundControl = React.memo(function RoundControl({
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: bone.bg,
+    backgroundColor: paper.bg,
   },
   topBar: {
     position: 'absolute',
@@ -330,13 +330,13 @@ const styles = StyleSheet.create({
   },
   toggle: {
     flexDirection: 'row',
-    backgroundColor: bone.surface,
+    backgroundColor: paper.surface,
     borderRadius: radii.full,
     borderWidth: 1,
-    borderColor: bone.hairline,
+    borderColor: paper.hairline,
     padding: 3,
     gap: 2,
-    ...elevation('raised', 'bone'),
+    ...elevation('raised', 'paper'),
   },
   toggleItem: {
     paddingHorizontal: spacing.md,
@@ -357,13 +357,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   emptyCard: {
-    backgroundColor: bone.surface,
+    backgroundColor: paper.surface,
     borderRadius: radii.full,
     borderWidth: 1,
-    borderColor: bone.hairline,
+    borderColor: paper.hairline,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
-    ...elevation('raised', 'bone'),
+    ...elevation('raised', 'paper'),
   },
   controls: {
     position: 'absolute',

@@ -2,18 +2,24 @@ import React, { useEffect } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Easing,
+  useAnimatedProps,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
+import Svg, { Circle } from 'react-native-svg';
 import { BlurView } from 'expo-blur';
+import { Cat, PaperPlaneTilt, X } from 'phosphor-react-native';
 
 import type { CapturePhase, DetectionBox } from '../store/captureStore';
+import { CircleButton } from './CircleButton';
 import {
   arena,
+  chrome,
   glass,
   hitSlopFor,
+  marmalade,
   press,
   radii,
   spacing,
@@ -21,7 +27,6 @@ import {
   text,
   useReduceMotion,
 } from '../theme';
-import { FramingRing } from './ProgressBar';
 
 /**
  * CaptureOverlay — the camera's entire UI (README section 6).
@@ -29,10 +34,18 @@ import { FramingRing } from './ProgressBar';
  * Arena context throughout: this is a committed immersive screen, so there is no light
  * surface anywhere on it.
  *
- * The overlay has one job beyond looking good, which is to make the framing window
- * legible. A player who does not understand why the ring is counting down will snap
- * instantly every time and never discover that waiting scores higher — so the prompt
- * text changes with the phase and says what to do, not what is happening.
+ * ## One control, not two
+ *
+ * The countdown ring and the shutter used to be separate objects — a ring in the middle of
+ * the screen and a button in a strip at the bottom — which asked the player to watch one
+ * thing and press another. They are now the same object: the ring is the shutter, it sits
+ * where the player is already looking, and the arc closing around it is the framing window
+ * running out.
+ *
+ * That matters because the framing window is the whole skill of this app. A player who
+ * does not understand why the ring is counting down will snap instantly every time and
+ * never discover that waiting scores higher, so the prompt under it says what to do rather
+ * than what is happening.
  */
 
 export interface CaptureOverlayProps {
@@ -63,70 +76,96 @@ export const CaptureOverlay = React.memo(function CaptureOverlay({
   onToggleShare,
 }: CaptureOverlayProps) {
   const busy = phase === 'capturing' || phase === 'scoring';
+  const seconds = Math.ceil(remainingMs / 1000);
 
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
       {box ? <DetectionFrame box={box} locked={phase === 'framing'} /> : null}
 
       <View style={styles.top} pointerEvents="box-none">
-        <Pressable
+        <CircleButton
+          Glyph={X}
           onPress={onClose}
-          hitSlop={hitSlopFor(44)}
-          accessibilityRole="button"
           accessibilityLabel="Close the camera"
-          style={styles.close}
-        >
-          <Text style={[text.bodySm, { color: arena.text }]}>Close</Text>
-        </Pressable>
-      </View>
+        />
 
-      <View style={styles.prompt} pointerEvents="none">
-        <PromptCopy
-          phase={phase}
-          detectionStreak={detectionStreak}
-          framesRequired={framesRequired}
-          remainingMs={remainingMs}
+        {/*
+          The design's slot for a flash toggle. This app has no flash — a startled cat is
+          a worse photo than a dark one — so the slot carries the control that actually
+          changes what this shot does: whether it goes to the feed.
+        */}
+        <CircleButton
+          Glyph={PaperPlaneTilt}
+          onPress={onToggleShare}
+          accessibilityLabel="Share this shot to the community feed"
+          glyphSize={17}
+          style={shareToFeed ? styles.shareOn : undefined}
         />
       </View>
 
-      {/*
-        The control strip is the one blurred surface here. BlurView over a live camera
-        preview is expensive, so it is a single fixed element and never wraps anything
-        that scrolls.
-      */}
-      <BlurView intensity={glass.intensity} tint={glass.tintDark} style={styles.strip}>
-        <View style={[styles.stripInner, { borderColor: arena.hairline }]}>
-          <Pressable
-            onPress={onToggleShare}
-            hitSlop={hitSlopFor(44)}
-            accessibilityRole="switch"
-            accessibilityState={{ checked: shareToFeed }}
-            accessibilityLabel="Share this shot to the community feed"
-            style={styles.shareToggle}
-          >
-            <View
-              style={[
-                styles.shareDot,
-                {
-                  backgroundColor: shareToFeed ? arena.text : 'transparent',
-                  borderColor: shareToFeed ? arena.text : arena.hairlineHi,
-                },
-              ]}
-            />
-            <Text style={[text.caption, { color: arena.textMuted }]}>Share</Text>
-          </Pressable>
+      <View style={styles.centre} pointerEvents="box-none">
+        <Shutter
+          phase={phase}
+          progress={progress}
+          onPress={onShutter}
+          disabled={busy}
+        />
 
-          <Shutter
+        <View style={styles.prompt} pointerEvents="none">
+          <PromptCopy
             phase={phase}
-            progress={progress}
-            onPress={onShutter}
-            disabled={busy}
+            detectionStreak={detectionStreak}
+            framesRequired={framesRequired}
           />
-
-          {/* Balances the strip so the shutter sits dead centre. */}
-          <View style={styles.shareToggle} />
         </View>
-      </BlurView>
+
+        {/*
+          The countdown is a bare numeral with no label. At 88pt under a closing ring it
+          needs no explaining, and "3s remaining" next to it would be the app narrating
+          something the player can already see.
+        */}
+        {phase === 'framing' && seconds > 0 ? (
+          <Text style={[text.displayHuge, styles.countdown]}>{seconds}</Text>
+        ) : null}
+      </View>
+
+      <View style={styles.bottom} pointerEvents="none">
+        <ModePill
+          label={phase === 'framing' ? 'Auto capture' : 'Tap to shoot'}
+          active={phase === 'framing'}
+        />
+        {shareToFeed ? <ModePill label="Sharing to feed" /> : null}
+      </View>
+    </View>
+  );
+});
+
+/** Wide-tracked mono capitals on glass. Names the mode; never prose. */
+const ModePill = React.memo(function ModePill({
+  label,
+  active = false,
+}: {
+  label: string;
+  active?: boolean;
+}) {
+  return (
+    <View style={styles.pill}>
+      <BlurView
+        intensity={glass.intensity}
+        tint={glass.tintDark}
+        style={[StyleSheet.absoluteFill, styles.pillRadius]}
+      />
+      <View
+        pointerEvents="none"
+        style={[
+          StyleSheet.absoluteFill,
+          styles.pillRadius,
+          { backgroundColor: 'rgba(255,255,255,0.12)' },
+        ]}
+      />
+      <Text style={[text.eyebrow, { color: active ? marmalade[500] : chrome.text }]}>
+        {label}
+      </Text>
     </View>
   );
 });
@@ -141,12 +180,10 @@ const PromptCopy = React.memo(function PromptCopy({
   phase,
   detectionStreak,
   framesRequired,
-  remainingMs,
 }: {
   phase: CapturePhase;
   detectionStreak: number;
   framesRequired: number;
-  remainingMs: number;
 }) {
   if (phase === 'capturing') {
     return <Text style={[text.h3, styles.promptText]}>Holding still</Text>;
@@ -157,16 +194,8 @@ const PromptCopy = React.memo(function PromptCopy({
   }
 
   if (phase === 'framing') {
-    const seconds = Math.ceil(remainingMs / 1000);
     return (
-      <>
-        <Text style={[text.h3, styles.promptText]}>Wait for a better moment</Text>
-        <Text style={[text.bodySm, styles.promptSub]}>
-          {seconds > 0
-            ? `Shooting automatically in ${seconds}s`
-            : 'Taking the shot'}
-        </Text>
-      </>
+      <Text style={[text.h3, styles.promptText]}>Wait for a better moment</Text>
     );
   }
 
@@ -183,7 +212,7 @@ const PromptCopy = React.memo(function PromptCopy({
   );
 });
 
-/** Detection bounding box. Corner brackets rather than a full rectangle. */
+/** Detection bounding box. A thin rounded rect, well behind the ring in emphasis. */
 const DetectionFrame = React.memo(function DetectionFrame({
   box,
   locked,
@@ -206,8 +235,8 @@ const DetectionFrame = React.memo(function DetectionFrame({
   }, [locked, reduceMotion, settle]);
 
   const animated = useAnimatedStyle(() => ({
-    borderColor: locked ? arena.text : arena.hairlineHi,
-    opacity: 0.55 + settle.value * 0.45,
+    borderColor: locked ? arena.hairlineHi : arena.hairline,
+    opacity: 0.4 + settle.value * 0.35,
     transform: [{ scale: 1 + (1 - settle.value) * 0.02 }],
   }));
 
@@ -230,13 +259,23 @@ const DetectionFrame = React.memo(function DetectionFrame({
   );
 });
 
+const RING_SIZE = 220;
+const RING_STROKE = 4;
+const RING_RADIUS = (RING_SIZE - RING_STROKE) / 2;
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
+
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
+
 /**
- * The shutter.
+ * The shutter: a ring you can press, with the framing window drawn around its edge.
  *
- * During the framing window the countdown ring wraps it, so the timer and the control it
- * governs are the same object — the player never has to look in two places. Progress is
- * shown in the button itself rather than as a separate spinner (README mandatory states:
- * "Progress in the shutter button itself").
+ * The arc is a real SVG stroke driven by `strokeDashoffset` through `useAnimatedProps`,
+ * so it runs on the UI thread. That matters more here than anywhere else in the product —
+ * this is animating on top of a live camera preview while frames are being analysed, and
+ * a JS-driven animation visibly stutters under that load.
+ *
+ * The ring does not turn red as it empties. The window running out is not a failure; it
+ * just means the app takes the shot for you.
  */
 const Shutter = React.memo(function Shutter({
   phase,
@@ -249,137 +288,151 @@ const Shutter = React.memo(function Shutter({
   onPress: () => void;
   disabled: boolean;
 }) {
-  const pressed = useSharedValue(0);
   const reduceMotion = useReduceMotion();
+  const pressed = useSharedValue(0);
+  const sweep = useSharedValue(0);
+  const detected = phase === 'framing';
+
+  const clamped = Math.max(0, Math.min(1, progress));
+
+  useEffect(() => {
+    // Linear is correct here and nowhere else: this represents real elapsed time, and
+    // easing it would make the ring lie about how long is left.
+    sweep.value = reduceMotion
+      ? clamped
+      : withTiming(clamped, { duration: 80, easing: Easing.linear });
+  }, [clamped, reduceMotion, sweep]);
+
+  const arcProps = useAnimatedProps(() => ({
+    strokeDashoffset: RING_CIRCUMFERENCE * (1 - sweep.value),
+  }));
 
   const animated = useAnimatedStyle(() => ({
     transform: [{ scale: 1 - (1 - press.scale) * pressed.value }],
   }));
 
   return (
-    <View style={styles.shutterWrap}>
-      {phase === 'framing' ? <FramingRing progress={progress} size={78} /> : null}
-
-      <Pressable
-        onPress={onPress}
-        disabled={disabled}
-        onPressIn={() => {
-          pressed.value = reduceMotion ? 0 : withSpring(1, spring.snap);
-        }}
-        onPressOut={() => {
-          pressed.value = withSpring(0, spring.snap);
-        }}
-        hitSlop={hitSlopFor(78)}
-        accessibilityRole="button"
-        accessibilityLabel={
-          phase === 'framing' ? 'Take the shot now' : 'Take a photo'
-        }
-        accessibilityState={{ disabled }}
-        style={styles.shutterTouch}
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      onPressIn={() => {
+        pressed.value = reduceMotion ? 0 : withSpring(1, spring.snap);
+      }}
+      onPressOut={() => {
+        pressed.value = withSpring(0, spring.snap);
+      }}
+      hitSlop={hitSlopFor(RING_SIZE)}
+      accessibilityRole="button"
+      accessibilityLabel={detected ? 'Take the shot now' : 'Take a photo'}
+      accessibilityState={{ disabled }}
+    >
+      <Animated.View
+        style={[styles.ring, { opacity: disabled ? 0.5 : 1 }, animated]}
       >
-        <Animated.View
-          style={[
-            styles.shutterOuter,
-            { borderColor: arena.text, opacity: disabled ? 0.5 : 1 },
-            animated,
-          ]}
-        >
-          <View style={[styles.shutterInner, { backgroundColor: arena.text }]} />
-        </Animated.View>
-      </Pressable>
-    </View>
+        <Svg width={RING_SIZE} height={RING_SIZE} style={StyleSheet.absoluteFill}>
+          <Circle
+            cx={RING_SIZE / 2}
+            cy={RING_SIZE / 2}
+            r={RING_RADIUS}
+            fill="none"
+            stroke={arena.hairlineHi}
+            strokeWidth={RING_STROKE}
+          />
+          {detected ? (
+            <AnimatedCircle
+              cx={RING_SIZE / 2}
+              cy={RING_SIZE / 2}
+              r={RING_RADIUS}
+              fill="none"
+              stroke={marmalade[600]}
+              strokeWidth={RING_STROKE}
+              strokeLinecap="round"
+              strokeDasharray={RING_CIRCUMFERENCE}
+              // Starts at twelve o'clock rather than three, so the arc closes the way a
+              // clock does and not from an arbitrary point on the right-hand side.
+              transform={`rotate(-90 ${RING_SIZE / 2} ${RING_SIZE / 2})`}
+              animatedProps={arcProps}
+            />
+          ) : null}
+        </Svg>
+
+        <Cat
+          size={56}
+          weight={detected ? 'fill' : 'regular'}
+          color={detected ? chrome.text : arena.textMuted}
+        />
+      </Animated.View>
+    </Pressable>
   );
 });
 
 const styles = StyleSheet.create({
   top: {
     position: 'absolute',
-    top: spacing.xxxl,
+    top: 62,
     left: spacing.md,
     right: spacing.md,
     flexDirection: 'row',
-    justifyContent: 'flex-start',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
-  close: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
+  shareOn: {
+    // The one place a control's *state* is worth the accent on this screen.
     borderRadius: radii.full,
-    backgroundColor: arena.surface,
+    borderWidth: 2,
+    borderColor: marmalade[600],
+  },
+  centre: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    // Lifts the ring off dead centre so the countdown numeral underneath it does not sit
+    // on the bottom edge of the frame.
+    paddingBottom: 96,
+  },
+  ring: {
+    width: RING_SIZE,
+    height: RING_SIZE,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   prompt: {
-    position: 'absolute',
-    left: spacing.lg,
-    right: spacing.lg,
-    bottom: 170,
+    marginTop: spacing.xl,
+    paddingHorizontal: spacing.lg,
     alignItems: 'center',
-    gap: spacing.xxs,
   },
   promptText: {
-    color: arena.text,
+    color: chrome.text,
     textAlign: 'center',
   },
   promptSub: {
     color: arena.textMuted,
     textAlign: 'center',
   },
+  countdown: {
+    marginTop: spacing.xs,
+    color: chrome.text,
+  },
   detection: {
     position: 'absolute',
     borderWidth: 2,
     borderRadius: radii.lg,
   },
-  strip: {
+  bottom: {
     position: 'absolute',
     left: spacing.md,
     right: spacing.md,
-    bottom: spacing.xxl,
-    borderRadius: radii.xxl,
+    bottom: 54,
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  pill: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: radii.full,
     overflow: 'hidden',
   },
-  stripInner: {
-    // Real glass, not just a blur: the 1px inner border and the top highlight are what
-    // make it read as a material rather than a smudge.
-    borderWidth: StyleSheet.hairlineWidth,
-    borderTopColor: arena.innerHighlight,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    borderRadius: radii.xxl,
-  },
-  shareToggle: {
-    width: 66,
-    alignItems: 'center',
-    gap: spacing.xxs,
-  },
-  shareDot: {
-    width: 16,
-    height: 16,
-    borderRadius: radii.full,
-    borderWidth: 1.5,
-  },
-  shutterWrap: {
-    width: 84,
-    height: 84,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  shutterTouch: {
-    position: 'absolute',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  shutterOuter: {
-    width: 66,
-    height: 66,
-    borderRadius: radii.full,
-    borderWidth: 3,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  shutterInner: {
-    width: 52,
-    height: 52,
+  pillRadius: {
     borderRadius: radii.full,
   },
 });

@@ -12,7 +12,7 @@ import { PhotoCardSkeleton } from '../../components/Skeleton';
 import { showToast } from '../../components/Toast';
 import type { Photo } from '../../models';
 import { useAlbumStore } from '../../store/albumStore';
-import { bone, fern, layout, radii, spacing, text } from '../../theme';
+import { paper, marmalade, layout, radii, spacing, text } from '../../theme';
 import type { ChallengesStackParamList } from '../../navigation/types';
 
 /**
@@ -97,7 +97,7 @@ export function ChallengeSubmissionScreen({ route, navigation }: Props) {
 
       {currentEntry ? (
         <View style={styles.notice}>
-          <Text style={[text.bodySm, { color: bone.textMuted }]}>
+          <Text style={[text.bodySm, { color: paper.textMuted }]}>
             You already have an entry. Picking a different photo replaces it.
           </Text>
         </View>
@@ -179,7 +179,7 @@ const styles = StyleSheet.create({
     padding: 2,
   },
   selected: {
-    borderColor: fern[500],
+    borderColor: marmalade[500],
   },
   actions: {
     marginTop: spacing.xxl,

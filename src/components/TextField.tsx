@@ -11,7 +11,7 @@ import {
 
 import {
   contextColors,
-  fern,
+  marmalade,
   radii,
   semantic,
   spacing,
@@ -41,7 +41,7 @@ export const TextField = React.memo(function TextField({
   label,
   helper,
   error,
-  context = 'bone',
+  context = 'paper',
   style,
   ...inputProps
 }: TextFieldProps) {
@@ -51,7 +51,7 @@ export const TextField = React.memo(function TextField({
   const borderColor = error
     ? semantic.danger
     : focused
-      ? fern[500]
+      ? marmalade[500]
       : c.hairlineHi;
 
   return (
@@ -106,7 +106,7 @@ export const SearchField = React.memo(function SearchField({
   value,
   onChangeText,
   placeholder = 'Search',
-  context = 'bone',
+  context = 'paper',
   style,
 }: {
   value: string;
@@ -124,7 +124,7 @@ export const SearchField = React.memo(function SearchField({
         styles.searchWell,
         {
           backgroundColor: c.sunken,
-          borderColor: focused ? fern[500] : c.hairline,
+          borderColor: focused ? marmalade[500] : c.hairline,
           borderWidth: focused ? 2 : 1,
         },
         style,

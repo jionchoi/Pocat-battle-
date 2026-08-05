@@ -12,7 +12,7 @@ import { SegmentRow } from '../social/LeaderboardScreen';
 import { showToast } from '../../components/Toast';
 import { shopApi, type CatalogResponse } from '../../api/endpoints';
 import type { ShopItemKind } from '../../models';
-import { bone, measure, spacing, text } from '../../theme';
+import { paper, measure, spacing, text } from '../../theme';
 import { useAuthStore } from '../../store/authStore';
 
 /**
@@ -93,7 +93,7 @@ export function ShopScreen() {
         <Card style={styles.proActive}>
           <Eyebrow label="Active" />
           <Text style={[text.h2, styles.proTitle]}>You have Pro</Text>
-          <Text style={[text.body, { color: bone.textMuted }]}>
+          <Text style={[text.body, { color: paper.textMuted }]}>
             Unlimited album storage and full-resolution exports are on. Manage or cancel in
             your {Platform.OS === 'ios' ? 'App Store' : 'Play Store'} subscription settings.
           </Text>
@@ -128,7 +128,7 @@ export function ShopScreen() {
             {items.map((item) => (
               <View key={item.id} style={styles.row}>
                 <View style={styles.rowBody}>
-                  <Text style={[text.h3, { color: bone.text }]}>{item.name}</Text>
+                  <Text style={[text.h3, { color: paper.text }]}>{item.name}</Text>
                   <Text style={[text.bodySm, styles.rowDescription]}>
                     {item.description}
                   </Text>
@@ -178,7 +178,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.lg,
   },
   proTitle: {
-    color: bone.text,
+    color: paper.text,
     marginTop: spacing.xs,
     marginBottom: spacing.xxs,
   },
@@ -193,11 +193,11 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   rowDescription: {
-    color: bone.textMuted,
+    color: paper.textMuted,
     maxWidth: measure,
   },
   footnote: {
-    color: bone.textFaint,
+    color: paper.textFaint,
     marginTop: spacing.xl,
     maxWidth: measure,
   },

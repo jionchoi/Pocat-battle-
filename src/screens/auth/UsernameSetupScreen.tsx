@@ -1,42 +1,35 @@
 import React, { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { Avatar } from '../../components/Avatar';
 import { Button } from '../../components/Button';
 import { InlineError } from '../../components/EmptyState';
 import { Screen, ScreenHeader, SectionHeader } from '../../components/Screen';
 import { TextField } from '../../components/TextField';
-import type { AuthStackParamList } from '../../navigation/types';
-import { bone, fern, radii, spacing, text } from '../../theme';
+import {
+  AVATARS,
+  DEFAULT_AVATAR_ID,
+  buildAvatarUrl,
+} from '../../constants/avatars';
+import { paper, marmalade, radii, spacing, text } from '../../theme';
 import { useAuthStore } from '../../store/authStore';
 
 /**
  * Trainer name and avatar.
  *
  * Avatars are a fixed set rather than a photo upload: a user-supplied profile image on a
- * social product is a moderation obligation, and this is a cat game.
+ * social product is a moderation obligation, and this is a cat game. The set itself lives
+ * in constants/avatars so the picker here and the renderer in Avatar agree on the ids.
  */
 
-const AVATARS = [
-  { id: 'ember', label: 'Ember', hue: '#A63B2E' },
-  { id: 'moss', label: 'Moss', hue: '#2F6B4F' },
-  { id: 'slate', label: 'Slate', hue: '#4A6D86' },
-  { id: 'brass', label: 'Brass', hue: '#A07A2C' },
-  { id: 'mulberry', label: 'Mulberry', hue: '#7C4F6B' },
-  { id: 'stone', label: 'Stone', hue: '#8A8078' },
-];
-
-type Props = NativeStackScreenProps<AuthStackParamList, 'UsernameSetup'>;
-
-export function UsernameSetupScreen({ navigation }: Props) {
+export function UsernameSetupScreen() {
   const user = useAuthStore((s) => s.user);
   const setUsername = useAuthStore((s) => s.setUsername);
   const busy = useAuthStore((s) => s.busy);
   const error = useAuthStore((s) => s.error);
 
   const [name, setName] = useState(user?.username ?? '');
-  const [avatarId, setAvatarId] = useState(AVATARS[1].id);
+  const [avatarId, setAvatarId] = useState(DEFAULT_AVATAR_ID);
   const [fieldError, setFieldError] = useState<string | null>(null);
 
   const save = useCallback(async () => {
@@ -51,13 +44,13 @@ export function UsernameSetupScreen({ navigation }: Props) {
 
     try {
       // Avatar identity is stored as a scheme URL the client resolves locally, so no image
-      // hosting is involved.
-      await setUsername({ username: trimmed, avatarUrl: `catsnap://avatar/${avatarId}` });
-      navigation.replace('SignInSignUp');
+      // hosting is involved. Saving one is also what marks the account set up, which is
+      // what moves the root navigator on to the tabs — no navigation call needed.
+      await setUsername({ username: trimmed, avatarUrl: buildAvatarUrl(avatarId) });
     } catch {
       // Store holds the message; the banner renders it.
     }
-  }, [avatarId, name, navigation, setUsername]);
+  }, [avatarId, name, setUsername]);
 
   const selected = AVATARS.find((a) => a.id === avatarId) ?? AVATARS[0];
 
@@ -71,10 +64,10 @@ export function UsernameSetupScreen({ navigation }: Props) {
       {error ? <InlineError message={error} style={styles.banner} /> : null}
 
       <View style={styles.preview}>
-        <Avatar name={name || 'You'} size={72} />
+        <Avatar uri={buildAvatarUrl(avatarId)} name={name || 'You'} size={72} />
         <View style={styles.previewText}>
-          <Text style={[text.h3, { color: bone.text }]}>{name || 'Your name'}</Text>
-          <Text style={[text.bodySm, { color: bone.textMuted }]}>
+          <Text style={[text.h3, { color: paper.text }]}>{name || 'Your name'}</Text>
+          <Text style={[text.bodySm, { color: paper.textMuted }]}>
             {`${selected.label} avatar`}
           </Text>
         </View>
@@ -107,13 +100,13 @@ export function UsernameSetupScreen({ navigation }: Props) {
               style={[
                 styles.swatchWell,
                 {
-                  borderColor: active ? fern[600] : bone.hairline,
+                  borderColor: active ? marmalade[600] : paper.hairline,
                   borderWidth: active ? 2 : 1,
                 },
               ]}
             >
               <View style={[styles.swatch, { backgroundColor: avatar.hue }]} />
-              <Text style={[text.caption, { color: bone.textMuted }]}>
+              <Text style={[text.caption, { color: paper.textMuted }]}>
                 {avatar.label}
               </Text>
             </Pressable>

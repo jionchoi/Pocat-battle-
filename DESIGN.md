@@ -19,8 +19,9 @@ MOTION_INTENSITY  6   perpetual micro-interactions, spring physics, no linear ea
 VISUAL_DENSITY    4   daily-app spacing, macro-whitespace on marketing/reveal surfaces
 ```
 
-**Vibe archetype:** Soft Structuralism — warm neutral bases, heavy grotesk display type,
-airy components with diffused ambient shadows.
+**Vibe archetype:** neutral chrome, one hot coral, saturated tier badges. The photograph
+is the only thing on screen allowed to carry colour of its own; everything around it is
+white, black or grey.
 **Layout archetype:** Asymmetrical Bento, with Z-Axis Cascade reserved for the score
 reveal.
 
@@ -32,12 +33,15 @@ with their own token set, entered and exited deliberately.
 
 | Context | Screens | Token namespace |
 |---|---|---|
-| **Bone** (light) | Map, Album, Cat Dex, Photo Detail, Challenges, Social, Profile, Shop, Settings | `colors.bone.*` |
+| **Paper** (light) | Viral Feed, Map, Album, Cat Dex, Photo Detail, Challenges, Social, Profile, Shop, Settings | `colors.paper.*` |
 | **Arena** (dark) | Capture Camera, Score Result | `colors.arena.*` |
 
 Rule: a screen commits to one context for its entire surface. No light card floating on
-an Arena screen, no dark strip inside a Bone screen. The transition between contexts is a
+an Arena screen, no dark strip inside a Paper screen. The transition between contexts is a
 600ms cross-fade, never a hard cut.
+
+Photo Detail is the one screen that reads as a hybrid and is not one: the photograph is
+content, not a dark surface, and every piece of chrome on it belongs to the light context.
 
 Proper OS-level dark mode is Phase 2. The `arena` ramp is already structured to seed it,
 so it is a token swap and not a redesign.
@@ -46,94 +50,115 @@ so it is a token swap and not a redesign.
 
 ## 1. Color
 
-### Rule: one accent, saturation < 80%
+### Rule: one interactive accent
 
 The original palette shipped two accents (`#FF8A5B` coral **and** `#6C63FF` violet). The
-violet is the single most recognizable AI-design fingerprint and is banned outright. The
-coral sat at ~100% saturation.
+violet is the single most recognizable AI-design fingerprint and is banned outright.
 
-The fix reassigns roles rather than just recolouring: **the warm family becomes the
-neutral base** (it carries the "tabby / cozy" brand tone across every surface), and a
-single desaturated accent does all interactive work.
-
-```
-ACCENT — Fern
-fern.500   #3C8763   active / focus
-fern.600   #2F6B4F   default CTA fill, links, success        HSL(154, 39%, 30%)
-fern.700   #24543E   pressed
-fern.100   #E4EDE7   tinted fill, selected chip background
-```
-
-Fern reads as park / hedge / outdoors, which is thematically what the player is doing —
-walking a real neighborhood with a camera. It contrasts cleanly against warm sand neutrals, is 39%
-saturated, and is not purple, not neon-emerald, and not Stripe-blue.
-
-`fern.600` doubles as **success**. A separate success green would be a second accent.
-
-### Bone (light context)
+What replaces it is a split by *job* rather than by hue family. The chrome is a true
+neutral and carries no colour at all; one hot coral marks every place the player can act;
+and a closed four-value ramp encodes photo tier and nothing else. Three roles, three
+vocabularies, no overlap — a coral thing is always tappable, a gold thing is always
+Legendary, and a grey thing is always structure.
 
 ```
-bone.bg          #FBF8F4   app background — warm off-white
-bone.surface     #FFFFFF   inner core of a bezel
-bone.sunken      #F4EFE8   outer shell of a bezel, input wells
-bone.hairline    rgba(33,29,24,0.08)
-bone.hairlineHi  rgba(33,29,24,0.14)
-bone.text        #211D18   warm off-black — never #000000
-bone.textMuted   #6E655B
-bone.textFaint   #9A9086
+ACCENT — Coral
+marmalade.600  #FF5A36  CTA fill, active tab, trending flame, links
+marmalade.700  #E44A28  pressed
+marmalade.500  #FF7454  hover / on-photo variant
+marmalade.100  #FFF1EC  tinted fill — rank pill, accent badge, selected reaction
 ```
+
+The accent is deliberately saturated. It is doing one job on a screen otherwise made of
+white, black and photographs, and a desaturated version of it disappears against a busy
+cat photo — which is the exact situation it exists for.
+
+`sage.600` (`#4F7A5C`) is **not** a second accent. It is the muted complement used only
+where a success state must sit beside neutral content without competing.
+
+### Neutrals are true neutrals
+
+```
+paper.bg          #FFFFFF   app background and card surface
+paper.sunken      #F2F2F4   chips, inputs, skeleton bases
+paper.sunkenSoft  #F7F7F8   the softer well — reaction bars, inline rows, cards
+paper.hairline    #F0F0F1   dividers, meter tracks
+paper.hairlineHi  #E3E3E6
+paper.text        #0B0B0C
+paper.textMuted   #6B6B70
+paper.textSubtle  #8A8A90   metadata that still has to be read at a glance
+paper.textFaint   #A6A6AC
+```
+
+The previous system tinted every neutral warm at hue ~28°, on the reasoning that mixing
+warm and cool greys is a banned pattern. It still is — but the constraint that outranks it
+here is that **this is a scoring app for photographs**. A warm grey field beside a
+photograph shifts the photo's apparent white balance, and a product that tells you your
+composition scored 84 cannot be quietly recolouring the thing it is grading. The neutrals
+are unbiased for the same reason a gallery wall is.
+
+`chrome.fill` (`#0B0B0C`) is the one opaque dark surface in the light context — the
+floating tab bar, the rank disc on a poster, the selected filter chip. Every one of them
+uses that exact value, so they read as the same material. Never `#000000`: pure black
+clips on OLED and kills the shadow that separates the tab bar from the page.
 
 ### Arena (dark context)
 
 ```
-arena.bg         #14120F   warm off-black — not #000, not cool #0A0A0A
-arena.surface    rgba(255,255,255,0.06)
-arena.sunken     rgba(255,255,255,0.03)
-arena.hairline   rgba(255,255,255,0.10)
-arena.hairlineHi rgba(255,255,255,0.18)
-arena.text       #F5F1EB
-arena.textMuted  rgba(245,241,235,0.62)
-arena.textFaint  rgba(245,241,235,0.38)
+arena.bg          #0B0B0C
+arena.surface     rgba(255,255,255,0.12)
+arena.sunken      rgba(255,255,255,0.06)
+arena.hairline    rgba(255,255,255,0.15)
+arena.hairlineHi  rgba(255,255,255,0.28)
+arena.text        #FFFFFF
+arena.textMuted   rgba(255,255,255,0.62)
+arena.textFaint   rgba(255,255,255,0.32)
 ```
 
-Both grays are tinted warm (hue ~30°). Mixing warm and cool grays in one product is a
-banned pattern — there is no cool gray anywhere in this system.
+Surfaces here are white at low alpha rather than opaque greys, because everything on the
+camera and the reveal floats over a live preview or a photograph. An opaque grey panel
+over a photo reads as a rendering artefact; a translucent one reads as glass.
 
 ### Semantic
 
 ```
-danger   #A63B2E   brick — HSL(8, 57%, 41%)
-warning  #9A6B1F   brass
+danger   #D6402B
+warning  #B4952C
+success  #4F7A5C   (= sage.600)
 ```
 
-Both live in the warm family, so an error state does not visually leave the product.
-
-### Photo tier — a sequential scale, not four brand colors
-
-The brief calls for *"colored gradient border on photo cards matching rarity tier"*.
-Gradient-glow borders are a banned pattern. The tier is **semantic data encoding**, so it
-gets a controlled ramp that steps in both hue and lightness (readable for colorblind
-players, since it is never colour-only — see §7).
+### Photo tier — a closed encoding, never an accent
 
 Tier is derived server-side from the composite score: Common below 50, Rare 50–69,
 Epic 70–85, Legendary 86 and up.
 
 ```
-Common      #8A8078   stone      neutral, deliberately unremarkable
-Rare        #4A6D86   slate      HSL(203, 29%, 41%)
-Epic        #7C4F6B   mulberry   HSL(320, 22%, 40%)
-Legendary   #A07A2C   brass      HSL( 40, 57%, 40%)
+Common      #8B8D98   grey     glyph: Circle    1 pip
+Rare        #3B82F6   blue     glyph: Diamond   2 pips
+Epic        #A855F7   violet   glyph: Hexagon   3 pips
+Legendary   #D9B94C   gold     glyph: Crown     4 pips
 ```
 
-Mulberry is not a Lila-Ban violation: the ban targets neon violet button glows around
-hue 255° at high saturation. This is a 22%-saturated wine at hue 320°, used as a
-1px ring and a 6% tint fill — never as a glow.
+The ramp runs cool to warm as tier rises. That is the order a player already expects from
+every collection game they have played, and fighting the convention to be distinctive
+would cost comprehension and buy nothing.
 
-**Application (this is the mechanic that replaces the gradient border):** the tier tints
-the *outer shell* of the card's Double-Bezel (§3.A) at 8% opacity plus a hairline ring at
-40%. The inner core stays neutral so the photo itself is never colour-cast. Legendary
-additionally gets a single sheen sweep — a translated, masked highlight, pure
-`transform`/`opacity`, no `shadow` glow, and viewport-gated so a scrolled-off card stops.
+**On the violet.** The Lila-Ban targets neon violet as a *brand* colour — the AI-startup
+gradient, the violet CTA, the violet glow. This is none of those. It is one value in a
+four-step data scale, it appears only inside a tier badge or a meter fill, and it is
+structurally barred from every interactive affordance in the product. If Epic were coral
+instead, tier and tappability would share a colour, which is a far worse failure than
+using a hue that is unfashionable.
+
+**Application.** Tier is a solid badge worn in the top-right corner of the photograph,
+with a glyph and an uppercase label. This replaces the brief's gradient border (banned)
+*and* the previous tinted double-bezel shell, which cost 10pt of a 148pt poster to say
+something a corner badge says for free. Legendary alone carries a glow — a shadow at its
+own hue, never a gradient border — and a sheen sweep on its card, viewport-gated so a
+scrolled-off card stops animating.
+
+Never colour alone: `glyph`, `label` and `pips` each carry the same information, so tier
+survives greyscale and colourblindness.
 
 ### Pose classes get zero colors
 
@@ -149,129 +174,177 @@ named row ("Pose rarity · Mid-yawn"), never as a colour.
 Inter, Nunito, Nunito Sans, Baloo 2, Roboto, Open Sans, Helvetica and Arial are all banned.
 
 ```
-Display / UI   Satoshi Variable   (Fontshare — bundle locally, load via expo-font)
-Numeric        JetBrains Mono     (@expo-google-fonts/jetbrains-mono)
+Display / numerals   Plus Jakarta Sans   700, 800   (@expo-google-fonts/plus-jakarta-sans)
+UI / body            Manrope             400–800    (@expo-google-fonts/manrope)
+Mode labels          Space Mono          400, 700   (@expo-google-fonts/space-mono)
 ```
 
-Satoshi carries geometric warmth without the rounded-cartoon read of Baloo, which keeps
-the app from looking like a children's app while staying inviting. JetBrains Mono is
-tabular by construction — every score, score-component value, framing countdown, reaction
-count and leaderboard rank uses it, so digits never jitter while the reveal tallies up.
+Three voices, each with one job:
 
-`fontVariant: ['tabular-nums']` is unreliable on Android. Using a mono face is the fix, not
-the CSS property.
+**Plus Jakarta Sans ExtraBold** carries display, headings and every number. It is a
+tightly-spaced geometric grotesk that goes genuinely heavy at 800, which is what lets a
+two-digit score sit on a photograph at 100pt and read as a graphic rather than a caption.
+Numbers use it too — a photo app's numbers are trophies, and a trophy set in a text face
+is a receipt.
+
+**Manrope** carries UI and body. It is the quieter grotesk: slightly wider, lower
+contrast, and legible at the 9–11pt the metadata rows run at, where Jakarta's tight
+apertures start to close up.
+
+**Space Mono** carries labels that are not prose — the uppercase eyebrows ("YOUR SCORE",
+"AUTO CAPTURE") and technical annotations on a photo. It is the only voice with any
+personality, so it is rationed to text that is naming a mode.
+
+Numerals are tabular via `fontVariant`. The previous system used a mono face for every
+number specifically because `fontVariant: ['tabular-nums']` is unreliable on Android —
+that is true for arbitrary faces, but Jakarta ships real tabular figures, so it resolves
+rather than silently no-opping. The cost of the old approach was that every score in the
+product was set in a typewriter face.
 
 ### Scale
 
-| Token | Size / Line | Tracking | Weight | Use |
+| Token | Size / Line | Tracking | Face | Use |
 |---|---|---|---|---|
-| `display` | 34 / 36 | -1.2 | 800 | Score reveal, cat nickname on the result screen |
-| `h1` | 26 / 30 | -0.6 | 700 | Screen titles |
-| `h2` | 20 / 26 | -0.3 | 700 | Section heads, challenge title |
-| `h3` | 17 / 22 | -0.2 | 600 | Card titles |
-| `body` | 15 / 24 | 0 | 500 | Paragraph, list rows |
-| `bodySm` | 13 / 20 | 0 | 500 | Secondary meta |
-| `caption` | 11 / 16 | +0.2 | 500 | Timestamps, helper text |
-| `eyebrow` | 10 / 12 | +2.0 | 600 | Uppercase pill labels above headings |
-| `stat` | 15 / 20 | +0.4 | 500 | Mono — score components, reaction counts |
-| `statLg` | 28 / 30 | -0.4 | 600 | Mono — the composite score total |
+| `displayHuge` | 88 / 92 | -3.5 | Jakarta 800 | Score reveal (overridden to 100), capture countdown |
+| `display` | 34 / 38 | -1.0 | Jakarta 800 | Reserved for full-bleed moments |
+| `h1` | 26 / 31 | -0.6 | Jakarta 800 | Screen titles, wordmark, hero cat name |
+| `h2` | 20 / 26 | -0.4 | Jakarta 800 | Profile handle, tier label |
+| `h3` | 15 / 20 | -0.2 | Jakarta 800 | Section heads, card titles |
+| `body` | 14 / 22 | 0 | Manrope 500 | Paragraph, list rows |
+| `bodySm` | 12 / 18 | 0 | Manrope 500 | Secondary meta |
+| `caption` | 11 / 15 | 0 | Manrope 600 | Timestamps, helper text, chip labels |
+| `captionSm` | 9 / 13 | +0.1 | Manrope 600 | The metadata line riding on a card face |
+| `eyebrow` | 11 / 14 | +1.2 | Space Mono 700 | Uppercase mode labels |
+| `annotation` | 10 / 14 | +0.2 | Space Mono 400 | Technical note printed on a photo |
+| `stat` | 13 / 17 | 0 | Manrope 700 | Inline counts next to a glyph |
+| `statSm` | 10 / 14 | 0 | Manrope 700 | Counts riding on a photo |
+| `statMd` | 18 / 22 | -0.4 | Jakarta 800 | Stat-rail figures |
+| `statLg` | 40 / 42 | -1.6 | Jakarta 800 | Score totals |
 
-**No oversized H1s.** `display` caps at 34 on mobile. Hierarchy is carried by weight and
-colour, not by scale inflation.
+**No oversized H1s.** `display` caps at 34 on mobile. `displayHuge` is the single
+exception, reserved for the score reveal and the capture countdown, where one number is
+the entire screen.
 
-Weights in use: 500 / 600 / 700 / 800. The 400/700-only two-step is a flagged weakness.
+**Measure:** body copy is capped at `measure` (≈ 62 characters) via `maxWidth`.
 
-**Measure:** body copy is capped at `measure` (≈ 62 characters) via `maxWidth`. Long-form
-copy (Privacy & Data, onboarding, challenge prompts) must never run the full width of a
-tablet.
+**Orphans:** headings and narrative copy set `{ textBreakStrategy: 'balanced' }` on
+Android; iOS gets `preventOrphan()` from `utils/format`.
 
-**Orphans:** all headings and narrative copy set `{ textBreakStrategy: 'balanced' }` on
-Android; iOS gets a manual ` ` before the final word of hand-written headings.
-
-**Sentence case everywhere.** Not Title Case On Every Header. The only uppercase in the
-product is the `eyebrow` token.
+**Sentence case everywhere.** The only uppercase in the product is `eyebrow` and the tier
+badge label.
 
 ---
 
 ## 3. Materiality
 
-### A. The Double-Bezel
+### A. The photograph is the surface
 
-No card, photo, tile or input sits flat on the background. Every significant container is
-a nested pair: an outer shell that reads as a machined tray, and an inner core that reads
-as the glass plate sitting in it.
+The previous system put every card in a **Double-Bezel**: an outer shell tinted by tier,
+a hairline ring, and a concentric inner core holding the image. It is deleted, for two
+reasons.
+
+The first is arithmetic. A 6pt shell plus a hairline on each side takes 14pt out of a
+110pt Cat Dex tile — roughly a quarter of the cat — to communicate something a corner
+badge communicates for free.
+
+The second is that the bezel needed the page to be darker than the card. The page is now
+white, so the inner core became the same colour as the background behind it and all the
+bezel rendered was a grey picture frame around nothing.
+
+What replaces it: **the photograph runs to the card's own edge**, and the chrome is worn
+on the image. One consistent corner grammar across every photo surface in the product —
 
 ```
-Outer shell   bg bone.sunken · 1px hairline ring · padding 6 · radius 28
-Inner core    bg bone.surface · inset top highlight · radius 22  (= 28 − 6, concentric)
+top-left    score chip     chrome black at 55%, white tabular figure
+top-right   tier badge     opaque tier fill, glyph + uppercase label
+bottom      name / meta    over a two-stop scrim
 ```
 
-Radii must be concentric or the curves visibly disagree. `radii.concentric(outer, pad)`
-exists for exactly this and is the only correct way to compute an inner radius.
+— so a player who has learned to read a feed card can read an album tile, a showcase cell
+and a Dex entry without being taught three times.
 
-Applies to: `PhotoCard`, `CatDexEntry`, shop tiles, the score-result card, the floating
-tab bar.
+`concentric()` survives in `theme/radii` for the few genuine nested cases, and remains the
+only correct way to derive an inner radius when there is one.
 
 ### B. Anti-card-overuse
 
 A card is only allowed when **elevation communicates hierarchy**. Everything else groups
 with a `hairline` divider or with pure negative space:
 
-- Settings, Privacy & Data, Friends List → `divide-y` hairlines, no cards
-- Profile and public-profile stats → negative space + mono numerals, no boxes
+- Settings, Privacy & Data, Friends List → hairlines, no cards
+- Profile stat rail → one rule above, one below, dividers between. No box
 - Leaderboard rows → hairlines, no boxes
-- Album grid and Cat Dex → cards (elevation is the point; each is a tangible photo)
+- Album grid, Cat Dex, showcase → the photo *is* the card; no container around it
+
+`Card` itself is now a single soft well (`sunkenSoft`), not a shell wrapping a core. On a
+white page a shade off white is enough separation, and it reads as recessed rather than
+as one more floating box.
 
 ### C. Shadows
 
-Generic black `box-shadow` is banned. Every shadow is tinted to the background hue
-(`#3A2E22` warm charcoal in Bone, `#0A0806` warm near-black in Arena — pure `#000000` is
-banned in shadows too), wide-spreading and low-opacity — a diffusion shadow, not a drop
-shadow.
+Default elevation is **flat**, and most surfaces stay there. On a white page a shadow
+under every tile turns a grid into a pile of receipts.
 
-RN has no `inset` box-shadow, so the Double-Bezel's inner highlight is a real 1px top
-border rather than a faked inset shadow. This is the only mechanism that actually renders
-edge refraction on native.
+Five levels exist. `hairline` (1/2 at 5%) is the workhorse — it separates a white card
+from a white page and does nothing more. `floating` is reserved for the tab bar, which
+genuinely hovers over scrolling content, and `modal` for sheets.
 
-Default elevation is **0**. Four levels exist; most surfaces use `flat`.
+Shadows are neutral black at low opacity, matching the neutral chrome, and all point
+straight down — one light source. The one exception is `accentGlow()`, which tints a
+shadow to the accent's own hue for the capture shutter and the primary CTA: a saturated
+coral button dropping a grey shadow looks unlit, and this is the only place in the product
+a coloured shadow is allowed.
+
+RN has no `inset` box-shadow, so where an inner highlight is wanted it is a real 1px top
+border (`innerHighlight()`).
 
 ### D. Glass
 
-Where blur is used — the floating tab bar, the catch-camera control strip, modal
-scrims — it is real glass, not just `expo-blur`:
+Where blur is used it is real glass, not just `expo-blur`:
 
 ```
-BlurView intensity 40   +  1px inner border (hairline)  +  inset top highlight
+BlurView intensity 40   +   a tint over it   +   1px inner border
 ```
+
+The tint is not optional. Blur alone samples whatever is behind it, so the same button
+over a bright sky and over a dark alley ends up as two different-looking controls — the
+tint is what makes them one material.
 
 **Performance constraint:** `BlurView` only ever wraps a fixed or absolutely-positioned
-element. Never inside a `ScrollView` or `FlatList` row. Blur over a live camera preview
-plus a scrolling list is the single fastest way to drop frames on mid-range Android. In
-practice this leaves exactly two blurred surfaces: the floating tab bar and the capture
-control strip.
+element. Never inside a `ScrollView` or `FlatList` row. In practice this leaves the
+capture screen's circle buttons and mode pills, and the photo-detail hero buttons.
 
 ### E. Texture
 
-A fixed, `pointerEvents="none"` grain overlay at 3% opacity sits above the Arena
-background only. It is a static asset positioned `absolute inset-0`, never attached to a
-scrolling container.
+The grain overlay is **arena-only** (`Screen` defaults it to `context === 'arena'`). It
+earns its cost there, breaking up banding in the dark gradient behind a 100pt numeral. On
+a white page it does not: dots on white read as dirt rather than as tooth, and it was
+mounting an SVG overlay on every screen to render a texture nobody could see.
 
 ### F. Shape
 
 ```
-xs 8   chips, ticks
-sm 10  badges, mono value pills
-md 14  secondary buttons, inputs
-lg 20  inner cores of small bezels
-xl 28  card outer shells
-xxl 36 modals, catch result card
-full   999 — primary CTAs, tab bar, avatars
+xs   8    icon wells, small glyph squares
+sm   10   badges, tier chips, value pills
+md   14   secondary buttons, inputs
+lg   18   collection tiles, showcase cells, wall cards, cards
+xl   20   poster cards on the trending rail
+xxl  26   the sheet overlapping a hero, bottom sheets, modals
+full 999  primary CTAs, tab bar, avatars, the capture shutter
 ```
 
+The scale is tighter than it was. Photographs now bleed to the card edge with no bezel
+between them, and a 28pt radius on a 148pt poster eats a visible bite out of the cat.
+Containers hold their curve; anything wrapping an image sits at 16–20.
+
 Radii vary by depth: tighter inside, softer outside. Uniform radius on everything is a
-flagged weakness. Avatars use **squircles** (`radii.xl` on a square) rather than perfect
-circles, except for author chips sitting over a photo in the feed, where a round crop
-reads correctly against the image.
+flagged weakness.
+
+**Avatars are circles.** They were squircles, on the reasoning that circle avatars read as
+generic. In this product they read as *photos*: every avatar sits either on a cat
+photograph or in a row beside one, and at 36–64pt a rounded square is indistinguishable
+from a thumbnail of a cat. The round crop is what says "this is a person", which is the
+only thing the shape has to communicate.
 
 ---
 
@@ -338,33 +411,60 @@ stagger 60ms per index
 
 ---
 
-## 5. Navigation — the Fluid Island tab bar
+## 5. Navigation — the floating bar and the shutter
 
-Edge-to-edge nav bars glued to a screen edge are a banned layout. The RN translation of
-the Fluid Island pattern:
+Edge-to-edge nav bars glued to a screen edge are a banned layout. The assembly is a
+**dark pill detached from the bottom edge** — inset 16 from each side, lifted clear of the
+safe-area inset, `radii.full`, `chrome.fill`, `floating` elevation — with the **capture
+shutter riding above it in the accent**.
 
-The tab bar is a **floating glass pill detached from the bottom edge** — inset 16 from
-each side, lifted clear of the safe-area inset, `radii.full`, `BlurView` + hairline inner
-border + inset top highlight. It is the one place in the app allowed to use `z-index`.
+It replaces the glass pill it used to be. Blur was the wrong material here: the bar sits
+over a white feed most of the time, so the blur resolved to a pale smudge with almost no
+contrast against the page, and the active tab had to carry the whole burden of being
+findable. Solid black gives the glyphs a fixed, high-contrast field regardless of what
+scrolls under it — and it costs one less continuously-repainting blur surface.
 
-- Active tab: Phosphor `fill` weight, `fern.600`, label visible
-- Inactive tab: Phosphor `light` weight, `textFaint`, label hidden
-- The active indicator is a single pill that **slides between slots** with the `soft`
-  spring — it does not fade out and in per tab.
-- Entering Arena context (Capture, Score Result) slides the bar off-screen downward with
-  `exit` timing. Immersive screens have no chrome.
+- Four slots, glyphs only, split two-and-two around the shutter. Labels do not fit at
+  this width; the names survive as accessibility labels, which is where a screen reader
+  looks for them anyway.
+- The **album has no slot**. It gave its position to the shutter, and its stack stays
+  mounted and navigable — it is entered from Profile, which is also where its recent
+  photos are shown.
+- Active tab: Phosphor `fill`, `marmalade.600`, scaled 1.08 on a `snap` spring.
+- Inactive tab: Phosphor `regular`, `chrome.textMuted`. Weight and colour change together,
+  so the active tab is legible in greyscale.
+- Entering Arena context (Capture, Score Result) slides the whole assembly off-screen
+  downward with `exit` timing. Immersive screens have no chrome.
 
-**Icons:** `phosphor-react-native` exclusively — `light` for content, `fill` for active
-state, stroke weight standardized to 1.5 at every size. Lucide, Feather, FontAwesome and
-Material are banned as the default-AI icon choice. The brief's custom paw-based glyph set
-remains the intent; Phosphor's `MapTrifold` / `Cards` / `Trophy` / `UserCircle` are the
-shipping tab set until custom SVGs are drawn to the same 1.5 stroke.
+### The shutter is not a fifth tab
+
+Taking a photo is the only thing in this product that leaves the tab tree entirely, and it
+is the thing the whole app exists to do. So it takes the **centre** and breaks out of the
+pill's top edge: a 56pt coral disc with a 4pt white ring and an `accentGlow` shadow,
+rising 24pt clear of the bar.
+
+The ring is what makes it read as punching through the pill rather than resting on it.
+
+Four tabs fit around it because the album gave up its slot — the alternative was five tabs
+with a disc parked on top of the middle one, which is legible in a still and untappable on
+a phone. `fabSlot` holds the centre of the row open; the shutter is absolutely positioned,
+so it cannot reserve its own width.
+
+`layout.tabBarClearance` (116) clears the whole assembly, shutter included. Clearing only
+the pill would leave the last card in a list half under a coral disc.
+
+**The map carries no capture button.** It used to have a coral camera FAB above the tab
+bar; the shutter now sits ~60pt below that spot in the same colour, and two coral camera
+buttons that close together read as two different actions the player has to tell apart.
+
+**Icons:** `phosphor-react-native` exclusively — `regular` for content, `fill` for active
+state. `regular`, not `light`: the icons here are small (11pt reaction glyphs on a
+photograph, 21pt tab glyphs on black) and Phosphor's light stroke disappears at those
+sizes against anything but a plain field. Lucide, Feather, FontAwesome and Material are
+banned as the default-AI icon choice.
 
 **No emoji.** Anywhere. Not in UI, not in copy, not in push notification bodies, not in
 accessibility labels.
-
----
-
 ## 6. Amendments to the brief's screens & components
 
 ### 6.1 Challenges Hub — the three-card row is banned
@@ -410,17 +510,32 @@ time and never discover that waiting scores higher. Three rules follow:
 
 | Component | Change |
 |---|---|
-| `PhotoCard` | Tier gradient border → Double-Bezel with tier-tinted shell + hairline ring. `grid` and `feed` variants |
+| `PhotoCard` | Tier gradient border → photo bled to the card edge, score chip top-left, tier badge top-right. `grid` and `feed` variants |
+| `ViralCard` | `TrendingCard` (148pt poster, everything worn on the image) and `WallCard` (photo + metadata on white). Not variants of `PhotoCard` — the feed leads with what the community did, the album leads with the app's score |
+| `CircleButton` | Round glass/solid icon button for chrome floating on a photograph or the camera preview |
+| `TierCrest` | The hexagonal seal on the score reveal. An SVG path, not a CSS `clip-path` polygon — that is web-only and silently renders a plain square on native |
 | `RarityGlow` | **Deleted.** Outer glows are banned. Replaced by `RaritySheen` — a masked, translated highlight on Legendary only, viewport-gated |
 | `TypeIcon` | **Deleted** with the personality system. Pose is a named row in `ScoreBreakdown`, not an icon-only chip |
-| `FramingTimer` | → `FramingRing` in `ProgressBar`. A rotating sweep, not an animated SVG arc — RN cannot animate a stroke-dasharray on the UI thread |
+| `FramingTimer` | → the capture shutter itself. The countdown ring and the shutter used to be separate objects — a ring mid-screen and a button in a bottom strip — which asked the player to watch one thing and press another. Now one control: an SVG arc driven by `strokeDashoffset` through `useAnimatedProps`, so it runs on the UI thread over a live preview. `FramingRing` in `ProgressBar` remains for the smaller inline case |
 | `LoadingSpinner` | **Deleted.** Skeletons matching each layout's shape replace it everywhere; capture progress lives in the shutter button |
-| `Badge` | Tier/rank badges are square-ish (`radii.sm`), not pills. Pill-shaped "New"/"Beta" badges are a flagged cliché. The `eyebrow` pill survives for section labels only |
-| `TabBar` | → `FloatingTabBar` (§5), now four slots |
-| `ProgressBar` | `MeterBar` (rank XP, album quota — hairline track, `fern`), `ScoreMeter` (one breakdown row, staggered fill), `FramingRing` (capture countdown). All `scaleX`/`rotate`, never animated `width` |
-| `Avatar` | Squircle default; circle for author chips over a photo |
+| `Badge` | Tier badges are pills carrying a glyph + uppercase label, worn on the photograph. That is the one place a pill is right — it is a label on an image, not a "New"/"Beta" tag stuck to a menu item. `RarityChip` (tinted, for tier counts on neutral chrome), `ScoreChip` (the app's score on a photo face) and `Eyebrow` (now bare mono text, not a tinted pill) live here too |
+| `TabBar` | → `FloatingTabBar` (§5): four slots on a solid dark pill, glyphs only, with the capture shutter breaking out of the pill's top edge in the centre. The album is reached from Profile |
+| `ProgressBar` | `MeterBar` (rank XP, album quota), `ScoreMeter` (one breakdown row, `inline` or `stacked`, staggered fill, one hue per component), `FramingRing`. All `scaleX`/`rotate`, never animated `width` |
+| `Avatar` | Circle default (§3.F); `squircle` retained for the shop's frame previews |
 | `Card` | Base variant is **flat** — hairline, no shadow. Elevation is opt-in |
-| `VoteButton` | Laugh/love/wow only. There is deliberately no downvote to style |
+| `VoteButton` | Laugh/love/wow only. There is deliberately no downvote to style. `sm` is the inline pill under a feed card; `lg` is the 44pt bar on Photo Detail, where reacting is a primary action |
+
+### 6.2b The viral feed has no window control
+
+Today / This week / All time shipped as chips above the trending rail and have been
+removed. A time window is a lever on a ranking, and the ranking is not settled — offering
+three ways to slice a result set the product cannot yet explain asks the player to tune
+something nobody understands, and it puts a row of chrome above the first photograph on
+the app's home screen.
+
+The window still exists server-side, and the client still tracks which one it was served
+so paging keeps asking for the same slice. Restoring the control later is re-adding a
+component, not re-plumbing the screen.
 
 ### 6.3 Screens — additions
 
@@ -460,7 +575,7 @@ made". No `Alert.alert()` for validation; errors render inline beneath the field
 words: elevate, seamless, unleash, next-gen, game-changer, delve, tapestry.
 
 **Forms:** label above input, `gap 8`, helper text present in markup even when empty,
-error text below. Visible focus treatment on every input — a 2px `fern.500` ring, not a
+error text below. Visible focus treatment on every input — a 2px `marmalade.600` ring, not a
 platform default that Android silently drops.
 
 ---
@@ -537,11 +652,13 @@ navigation template; if it is missing, `npx expo install react-native-safe-area-
 
 Run this before any UI ships.
 
-- [ ] One accent colour only; no violet anywhere; every colour under 80% saturation
-- [ ] No Inter / Nunito / Baloo / Roboto / Arial in any style object
-- [ ] No `#000000` and no cool grays
-- [ ] Every card uses the Double-Bezel with concentric radii; the inner core stays neutral
-      so no photo is ever colour-cast by its tier
+- [ ] One *interactive* accent only. Tier hues appear on tier badges and meter fills and
+      nowhere else — never on a button, link or focus ring
+- [ ] No Inter / Nunito / Baloo / Roboto / Arial in any style object; numerals are Jakarta
+      800 with tabular figures
+- [ ] No `#000000` as a surface; neutrals are untinted, so no photo's white balance shifts
+- [ ] Photographs bleed to their card's edge; tier is a corner badge, never a tint over
+      the image, so no photo is ever colour-cast by its own score
 - [ ] No outer glows; every shadow tinted to its background hue
 - [ ] CTAs use the button-in-button trailing icon pattern
 - [ ] No three-equal-column card rows

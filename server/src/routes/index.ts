@@ -12,6 +12,7 @@ import { requireAuth } from '../middleware/auth';
 import {
   authLimiter,
   captureLimiter,
+  feedLimiter,
   generalLimiter,
   mapLimiter,
 } from '../middleware/rateLimit';
@@ -169,6 +170,24 @@ router.post(
 );
 
 /* ----------------------------------- feed --------------------------------- */
+
+/**
+ * Ranked home feed — deliberately unauthenticated.
+ *
+ * The response is identical for every reader and contains only photos their owners opted
+ * into sharing, so requiring a token would buy nothing and cost everything: a CDN will not
+ * cache a request carrying an `Authorization` header, and without an edge cache this
+ * endpoint's traffic scales with users rather than with refresh interval.
+ *
+ * Declared before `/feed` only for readability — Express matches on the full path, so the
+ * order of these two is not load-bearing.
+ */
+router.get(
+  '/feed/viral',
+  feedLimiter,
+  validate(feedCtl.viralQuerySchema, 'query'),
+  asyncRoute(feedCtl.viral)
+);
 
 router.get(
   '/feed',

@@ -26,7 +26,7 @@ export const EmptyState = React.memo(function EmptyState({
   Glyph,
   actionLabel,
   onAction,
-  context = 'bone',
+  context = 'paper',
   compact = false,
   style,
 }: {
@@ -80,7 +80,7 @@ export const EmptyState = React.memo(function EmptyState({
 export const LockedState = React.memo(function LockedState({
   title,
   requirement,
-  context = 'bone',
+  context = 'paper',
   style,
 }: {
   title: string;
@@ -104,7 +104,7 @@ export const LockedState = React.memo(function LockedState({
 export const InlineError = React.memo(function InlineError({
   message,
   onRetry,
-  context = 'bone',
+  context = 'paper',
   style,
 }: {
   message: string;

@@ -16,7 +16,7 @@ import { TextField } from '../../components/TextField';
 import { showToast } from '../../components/Toast';
 import type { CatProfile } from '../../models';
 import { useAlbumStore } from '../../store/albumStore';
-import { bone, layout, radii, spacing, text } from '../../theme';
+import { paper, layout, radii, spacing, text } from '../../theme';
 import type { AlbumStackParamList } from '../../navigation/types';
 import { pluralize, relativeTime } from '../../utils/format';
 
@@ -134,7 +134,7 @@ export function CatProfileScreen({ route, navigation }: Props) {
       {/* Encounter history as prose rather than a stat block — these are facts about a
           relationship, and a grid of numbers would read as a character sheet. */}
       <View style={styles.history}>
-        <Text style={[text.body, { color: bone.textMuted }]}>
+        <Text style={[text.body, { color: paper.textMuted }]}>
           {`You first photographed this cat ${relativeTime(firstEncounterAt)}, and have `}
           {`seen it ${pluralize(cat.encounterCount, 'time')} since. Your best shot `}
           {`scored ${cat.bestPhotoScore}.`}
@@ -247,20 +247,20 @@ const styles = StyleSheet.create({
     borderRadius: radii.xl,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: bone.hairline,
+    borderColor: paper.hairline,
   },
   miniPin: {
     width: 24,
     height: 24,
     borderRadius: radii.full,
-    backgroundColor: bone.surface,
+    backgroundColor: paper.surface,
     borderWidth: 1.5,
-    borderColor: bone.hairlineHi,
+    borderColor: paper.hairlineHi,
     alignItems: 'center',
     justifyContent: 'center',
   },
   miniPinText: {
-    color: bone.text,
+    color: paper.text,
   },
   grid: {
     flexDirection: 'row',

@@ -87,8 +87,15 @@ export const FEED_CONFIG = {
   /**
    * Impressions are batched before reporting. One request per photo scrolled past would
    * be a request per ~200ms of scrolling.
+   *
+   * Ten seconds rather than the original 2.5. This is the highest-frequency request every
+   * client makes, so the interval is a direct multiplier on fleet-wide write volume: at a
+   * hundred thousand concurrent readers it is the difference between ~40k and ~10k
+   * requests per second arriving at the impression endpoint. Nothing in the product reads
+   * a view count quickly enough to notice the delay, and the hook flushes on unmount so a
+   * reader who scrolls and leaves still counts.
    */
-  impressionFlushMs: 2500,
+  impressionFlushMs: 10_000,
 } as const;
 
 /**

@@ -49,6 +49,7 @@ export function PhotoAlbumGridScreen({ navigation }: Props) {
   const loadMore = useAlbumStore((s) => s.loadMore);
   const setFilters = useAlbumStore((s) => s.setFilters);
 
+  const userId = useAuthStore((s) => s.user?.id ?? null);
   const photoCount = useAuthStore((s) => s.user?.photoCount ?? 0);
   const photoLimit = useAuthStore((s) => s.user?.photoLimit ?? null);
 
@@ -61,9 +62,12 @@ export function PhotoAlbumGridScreen({ navigation }: Props) {
    */
   const [upsellDismissed, setUpsellDismissed] = useState(false);
 
+  // Keyed on the signed-in id: `load` reads the user out of the auth store and returns
+  // early when there is none, so a mount-only effect silently no-ops on a cold start.
   useEffect(() => {
+    if (!userId) return;
     void load();
-  }, [load]);
+  }, [load, userId]);
 
   /**
    * Debounced search. Without this every keystroke fires a request and a SQL query,

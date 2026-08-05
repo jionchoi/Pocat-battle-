@@ -9,9 +9,9 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
-  bone,
+  chrome,
   elevation,
-  fern,
+  marmalade,
   innerHighlight,
   radii,
   semantic,
@@ -93,9 +93,12 @@ export function ToastHost() {
   if (!item) return null;
 
   const palette = {
-    success: { bg: fern[600], fg: '#FFFFFF' },
-    error: { bg: semantic.danger, fg: '#FFFFFF' },
-    neutral: { bg: bone.text, fg: '#FFFFFF' },
+    // Success is the accent, not green: the accent already means "this worked" everywhere
+    // else in the product, and a green that appears only in toasts is a colour the player
+    // has to learn for one surface.
+    success: { bg: marmalade[600], fg: chrome.text },
+    error: { bg: semantic.danger, fg: chrome.text },
+    neutral: { bg: chrome.fill, fg: chrome.text },
   }[item.tone];
 
   return (
@@ -106,7 +109,7 @@ export function ToastHost() {
       style={[
         styles.wrap,
         { top: insets.top + spacing.xs },
-        elevation('floating', 'bone'),
+        elevation('floating', 'paper'),
         animated,
       ]}
     >

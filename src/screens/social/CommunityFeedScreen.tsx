@@ -15,7 +15,8 @@ import { FEED_CONFIG } from '../../constants/game';
 import { usePhotoImpressions } from '../../hooks/usePhotoImpressions';
 import type { PhotoWithAuthor, Reaction } from '../../models';
 import { useAuthStore } from '../../store/authStore';
-import { bone, layout, spacing, text } from '../../theme';
+import { useReactionStore } from '../../store/reactionStore';
+import { paper, layout, spacing, text } from '../../theme';
 import type { ChallengesStackParamList } from '../../navigation/types';
 import { FilterChips } from '../album/FilterChips';
 import { relativeTime } from '../../utils/format';
@@ -123,6 +124,10 @@ export function CommunityFeedScreen({ navigation }: Props) {
 
     try {
       const result = await photoApi.vote(photoId, reaction);
+      // The viral feed is served from a viewer-less cache and reads this device's own
+      // reactions from the store, so a reaction cast here has to land there too or the
+      // same photo would show as untapped on the home tab.
+      useReactionStore.getState().set(photoId, result.myReaction);
       setPhotos((current) =>
         current.map((photo) =>
           photo.id === photoId
@@ -153,10 +158,10 @@ export function CommunityFeedScreen({ navigation }: Props) {
             shape="circle"
           />
           <View style={styles.authorText}>
-            <Text style={[text.bodySm, { color: bone.text }]} numberOfLines={1}>
+            <Text style={[text.bodySm, { color: paper.text }]} numberOfLines={1}>
               {item.author.username}
             </Text>
-            <Text style={[text.caption, { color: bone.textMuted }]}>
+            <Text style={[text.caption, { color: paper.textMuted }]}>
               {relativeTime(item.capturedAt)}
             </Text>
           </View>

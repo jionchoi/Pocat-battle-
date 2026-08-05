@@ -1,15 +1,19 @@
 /**
  * Photo-tier encoding.
  *
- * The brief specified a "colored gradient border" per tier. Gradient glow borders are a
- * banned pattern, so the tier is encoded structurally instead:
+ * Tier is the one thing on a card the player reads before the photograph, so it is
+ * encoded as a solid badge that rides the top-right corner of every photo surface:
  *
- *   shellTint  ->  8% fill on the OUTER shell of the card's Double-Bezel
- *   ring       ->  40% hairline ring on that same shell
- *   inner core ->  stays neutral, so the photo itself is never color-cast
+ *   badge      ->  opaque fill + white glyph + white label, sitting on the image
+ *   chip       ->  tinted fill + coloured label, for tier counts on neutral chrome
+ *   base       ->  the pure hue, for meter fills and the reveal crest
  *
- * Tier is never conveyed by color alone: `label` and `pips` carry the same information
- * for colorblind players and for grayscale screenshots.
+ * These four hues are a closed set. They are never used for buttons, links, focus rings
+ * or any other interactive affordance — that is the accent's job exclusively, and the
+ * separation is what keeps a Legendary badge from reading as a tappable control.
+ *
+ * Tier is never conveyed by colour alone: `label`, `glyph` and `pips` each carry the same
+ * information for colourblind players and for grayscale screenshots.
  */
 
 import type { PoseClass, Rarity } from '../models';
@@ -19,58 +23,76 @@ import type { PoseClass, Rarity } from '../models';
 export type { PoseClass, Rarity };
 
 export interface RaritySpec {
-  /** Base hue for shell tint and ring. Desaturated by construction. */
+  /** The pure hue. Meter fills, the reveal crest, the glow. */
   base: string;
-  /** Outer-shell fill. */
-  shellTint: string;
-  /** Hairline ring on the outer shell. */
-  ring: string;
-  /** Foreground for the rarity badge label. */
+  /** Opaque badge fill for a badge sitting on a photograph. */
+  badge: string;
+  /** Tinted fill for a tier chip on neutral chrome. */
+  chipTint: string;
+  /** Foreground for a tier chip's label and count, against `chipTint`. */
   label: string;
-  /** Non-color redundancy: filled pip count, 1..4. */
+  /** Outer-shell fill, where a card is tinted rather than badged. */
+  shellTint: string;
+  /** Hairline ring on that same shell. */
+  ring: string;
+  /** Phosphor icon name. Non-colour redundancy, and the badge's whole silhouette. */
+  glyph: 'Crown' | 'Hexagon' | 'Diamond' | 'Circle';
+  /** Non-colour redundancy: filled pip count, 1..4. */
   pips: 1 | 2 | 3 | 4;
-  /** Only Legendary runs a perpetual sheen sweep — see motion.ts perpetual gate. */
+  /** Only Legendary carries a glow behind its badge, and a sheen sweep on its card. */
   sheen: boolean;
 }
 
+/**
+ * The ramp runs cool to warm as tier rises — grey, blue, violet, gold — which is the
+ * order a player already expects from every collection game they have played. Fighting
+ * that convention to be distinctive would cost comprehension and buy nothing.
+ *
+ * Legendary is the only tier with a glow, and the glow is a real shadow at the badge's
+ * own hue rather than a gradient border. Gradient glow borders are a banned pattern.
+ */
 export const rarity: Record<Rarity, RaritySpec> = {
-  /** Stone. Neutral and deliberately unremarkable. */
   Common: {
-    base: '#8A8078',
-    shellTint: 'rgba(138, 128, 120, 0.08)',
-    ring: 'rgba(138, 128, 120, 0.40)',
-    label: '#6E655B',
+    base: '#8B8D98',
+    badge: 'rgba(139, 141, 152, 0.90)',
+    chipTint: 'rgba(139, 141, 152, 0.14)',
+    label: '#6B6B70',
+    shellTint: 'rgba(139, 141, 152, 0.07)',
+    ring: 'rgba(139, 141, 152, 0.32)',
+    glyph: 'Circle',
     pips: 1,
     sheen: false,
   },
-  /** Slate. HSL(203, 29%, 41%). */
   Rare: {
-    base: '#4A6D86',
-    shellTint: 'rgba(74, 109, 134, 0.08)',
-    ring: 'rgba(74, 109, 134, 0.40)',
-    label: '#3C5A70',
+    base: '#3B82F6',
+    badge: 'rgba(59, 130, 246, 0.92)',
+    chipTint: 'rgba(59, 130, 246, 0.12)',
+    label: '#2A6FE0',
+    shellTint: 'rgba(59, 130, 246, 0.07)',
+    ring: 'rgba(59, 130, 246, 0.30)',
+    glyph: 'Diamond',
     pips: 2,
     sheen: false,
   },
-  /**
-   * Mulberry. HSL(320, 22%, 40%).
-   * Not a Lila-Ban violation: the ban targets neon violet glows near hue 255 at high
-   * saturation. This is a 22%-saturated wine at hue 320, used as a ring and an 8% tint.
-   */
   Epic: {
-    base: '#7C4F6B',
-    shellTint: 'rgba(124, 79, 107, 0.08)',
-    ring: 'rgba(124, 79, 107, 0.40)',
-    label: '#66405A',
+    base: '#A855F7',
+    badge: 'rgba(168, 85, 247, 0.92)',
+    chipTint: 'rgba(168, 85, 247, 0.12)',
+    label: '#8B3FE0',
+    shellTint: 'rgba(168, 85, 247, 0.07)',
+    ring: 'rgba(168, 85, 247, 0.30)',
+    glyph: 'Hexagon',
     pips: 3,
     sheen: false,
   },
-  /** Brass. HSL(40, 57%, 40%). */
   Legendary: {
-    base: '#A07A2C',
-    shellTint: 'rgba(160, 122, 44, 0.10)',
-    ring: 'rgba(160, 122, 44, 0.45)',
-    label: '#856426',
+    base: '#D9B94C',
+    badge: 'rgba(217, 185, 76, 0.95)',
+    chipTint: 'rgba(217, 185, 76, 0.14)',
+    label: '#B4952C',
+    shellTint: 'rgba(217, 185, 76, 0.12)',
+    ring: 'rgba(217, 185, 76, 0.36)',
+    glyph: 'Crown',
     pips: 4,
     sheen: true,
   },
@@ -79,7 +101,23 @@ export const rarity: Record<Rarity, RaritySpec> = {
 export const rarityOrder: readonly Rarity[] = ['Common', 'Rare', 'Epic', 'Legendary'];
 
 /**
- * Poses carry NO color — eleven more hues would obliterate the one-accent rule. They are
+ * Glow behind a Legendary badge or crest. Returned as a style object rather than a token,
+ * because the radius has to scale with whatever it is sitting behind.
+ */
+export function rarityGlow(tier: Rarity, radius = 8) {
+  const spec = rarity[tier];
+  if (!spec.sheen) return null;
+
+  return {
+    shadowColor: spec.base,
+    shadowOffset: { width: 0, height: 0 },
+    shadowRadius: radius,
+    shadowOpacity: 0.55,
+  } as const;
+}
+
+/**
+ * Poses carry NO colour — eleven more hues would obliterate the accent rule. They are
  * distinguished by glyph and label, rendered in `text` or `textMuted`.
  * Glyph names map to phosphor-react-native icons.
  */

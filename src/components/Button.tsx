@@ -16,9 +16,10 @@ import Animated, {
 import { ArrowUpRight } from 'phosphor-react-native';
 
 import {
+  accentGlow,
+  chrome,
   contextColors,
-  elevation,
-  fern,
+  marmalade,
   icon,
   iconWell,
   press,
@@ -37,7 +38,7 @@ export interface ButtonProps {
   label: string;
   onPress: () => void;
   variant?: ButtonVariant;
-  /** Committed screen context. Bone (light chrome) or Arena (dark immersive). */
+  /** Committed screen context. Paper (light chrome) or Arena (dark immersive). */
   context?: ContextName;
   /** Renders the nested trailing icon well. Never a naked glyph. */
   trailingIcon?: boolean;
@@ -64,7 +65,7 @@ export function Button({
   label,
   onPress,
   variant = 'primary',
-  context = 'bone',
+  context = 'paper',
   trailingIcon = false,
   loading = false,
   disabled = false,
@@ -103,26 +104,34 @@ export function Button({
     ],
   }));
 
-  const fillColor = destructive ? semantic.danger : fern[600];
+  const fillColor = destructive ? semantic.danger : marmalade[600];
 
   const palette = {
     primary: {
       background: fillColor,
       border: 'transparent',
-      foreground: '#FFFFFF',
+      foreground: chrome.text,
       well: 'rgba(255, 255, 255, 0.18)',
     },
     secondary: {
       background: context === 'arena' ? c.surface : c.sunken,
-      border: c.hairlineHi,
+      // No border. On the light context the fill is already a step off the page, and a
+      // hairline on top of it draws the same edge twice.
+      border: 'transparent',
       foreground: destructive ? semantic.danger : c.text,
-      well: context === 'arena' ? 'rgba(255,255,255,0.10)' : 'rgba(33,29,24,0.06)',
+      well: context === 'arena' ? 'rgba(255,255,255,0.12)' : 'rgba(11,11,12,0.06)',
     },
     ghost: {
       background: 'transparent',
       border: 'transparent',
-      foreground: destructive ? semantic.danger : fillColor,
-      well: context === 'arena' ? 'rgba(255,255,255,0.10)' : 'rgba(33,29,24,0.06)',
+      // On the arena a ghost button sits over a photograph, where the accent at ghost
+      // weight is not reliably legible — it takes the context's own text colour instead.
+      foreground: destructive
+        ? semantic.danger
+        : context === 'arena'
+          ? c.textMuted
+          : fillColor,
+      well: context === 'arena' ? 'rgba(255,255,255,0.12)' : 'rgba(11,11,12,0.06)',
     },
   }[variant];
 
@@ -147,7 +156,10 @@ export function Button({
             borderColor: palette.border,
             opacity: disabled ? 0.4 : 1,
           },
-          variant === 'primary' && !disabled && elevation('raised', context),
+          // A coral pill dropping a grey shadow looks unlit; the glow is tinted to the
+          // button's own hue so it reads as emitting. Suppressed when destructive — a
+          // red button that glows is asking to be pressed.
+          variant === 'primary' && !disabled && !destructive && accentGlow('button'),
           bodyStyle,
         ]}
       >
@@ -187,7 +199,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.sm,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: 1,
   },
   bodyFilled: {
     /** Primary CTAs are fully rounded pills with generous padding. */
@@ -223,7 +235,7 @@ const styles = StyleSheet.create({
  * replacement.
  */
 export const ButtonSkeleton = React.memo(function ButtonSkeleton({
-  context = 'bone',
+  context = 'paper',
   fullWidth = false,
 }: {
   context?: ContextName;

@@ -13,7 +13,45 @@ const extra = (Constants.expoConfig?.extra ?? {}) as {
   apiBaseUrl?: string;
 };
 
-export const API_BASE_URL = extra.apiBaseUrl ?? 'http://localhost:4000';
+/**
+ * Hosts that mean "the machine running the bundler" and are therefore meaningless to a
+ * phone: loopback, plus the three private IPv4 ranges.
+ */
+const LOCAL_HOST = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/;
+
+/**
+ * Where the API lives.
+ *
+ * A LAN address written into app.json goes stale the moment the router hands out a new
+ * lease, and the symptom is a request timeout — which reads as "the server is down" rather
+ * than "the address is wrong", so it costs an hour every time. On a device we instead reuse
+ * the host the app already reached Metro on: by definition this machine, and routable from
+ * wherever the app is actually running.
+ *
+ * Only local-looking hosts are rewritten. Pointing `apiBaseUrl` at staging or production
+ * still does exactly what it says.
+ */
+function resolveApiBaseUrl(): string {
+  const configured = extra.apiBaseUrl ?? 'http://localhost:4000';
+
+  let url: URL;
+  try {
+    url = new URL(configured);
+  } catch {
+    return configured;
+  }
+
+  if (!LOCAL_HOST.test(url.hostname)) return configured;
+
+  // "192.168.1.5:8081" while bundling; undefined in a standalone build.
+  const bundlerHost = Constants.expoConfig?.hostUri?.split(':')[0];
+  if (!bundlerHost || bundlerHost === url.hostname) return configured;
+
+  url.hostname = bundlerHost;
+  return url.origin;
+}
+
+export const API_BASE_URL = resolveApiBaseUrl();
 
 export class ApiRequestError extends Error implements ApiError {
   constructor(

@@ -96,15 +96,34 @@ than silently falling back to templates in a build that was meant to have LLM ca
 
 ### 4.1 Database
 
-**Supabase.** Project Settings → Database → Connection string → URI. Copy it twice, once at
-port `6543` and once at `5432`:
+**Supabase.** Project Settings → Database → Connection string. Pick **Session pooler** —
+one URL is enough locally:
 
 ```bash
 cd server
 ./setup-db.sh --supabase \
-  'postgresql://postgres.REF:PW@aws-0-REGION.pooler.supabase.com:6543/postgres' \
   'postgresql://postgres.REF:PW@aws-0-REGION.pooler.supabase.com:5432/postgres'
 ```
+
+**Do not use the "Direct connection" string** (`db.<ref>.supabase.co`). Supabase serves it
+over IPv6 only unless the project has the IPv4 add-on, so on most home and office networks
+it is unroutable — and Prisma reports that as `P1001 Can't reach database server`, which
+reads like a firewall problem rather than a DNS one. `setup-db.sh` now detects this and
+tells you, but it is worth knowing why.
+
+Two things change between the direct and pooler strings, and missing either looks like a
+password problem:
+
+| | direct | session pooler |
+|---|---|---|
+| host | `db.<ref>.supabase.co` | `aws-0-<region>.pooler.supabase.com` |
+| username | `postgres` | `postgres.<ref>` |
+
+**Session, not Transaction.** Session mode (`5432`) is a drop-in for a direct connection,
+so migrations work through it. Transaction mode (`6543`) is pgbouncer, and Prisma
+migrations cannot run through it — that is the only reason the script takes a second URL
+at all. For production you would use `6543` for the app and `5432` for migrations; locally
+one process means one connection, so the session pooler alone is simpler and correct.
 
 **Local Postgres** — identical code path, no signup:
 
@@ -138,8 +157,14 @@ npm start                     # then press "i" for the iOS simulator
 ```
 
 `localhost:4000` resolves correctly from the iOS simulator. **On a physical phone it does
-not** — `localhost` there means the phone. Set `extra.apiBaseUrl` in `app.json` to your
-machine's LAN IP (`192.168.45.91`) and make sure both are on the same Wi-Fi.
+not** — `localhost` there means the phone. You do not need to edit anything for that: when
+`extra.apiBaseUrl` points at a local address, the client swaps in whichever host the app
+reached Metro on, keeping the port. A hard-coded LAN IP would go stale on the next DHCP
+lease and fail as a timeout, which looks like a dead server rather than a wrong address.
+
+The phone does have to be on the same Wi-Fi as your machine. If signup times out, that is
+the first thing to check — followed by `ipconfig getifaddr en0` matching the IP in the
+Expo QR screen.
 
 ### 4.3 Check it worked
 
@@ -201,8 +226,15 @@ scored for rarity.
 textured and hold still; the heuristic detector needs ~12 consecutive frames before the
 countdown opens. A blank wall will never trigger it.
 
-**`prisma migrate` fails against Supabase.** You used the `6543` URL for `DIRECT_URL`. It has
-to be `5432`.
+**`prisma migrate` fails against Supabase.** Two different causes, and the error tells you
+which:
+
+- `P1001 Can't reach database server` — you used the direct (`db.<ref>.supabase.co`) host
+  on an IPv4-only network. Switch to the session pooler.
+- `P1000 Authentication failed` — wrong password, or you kept the plain `postgres` username
+  on a pooler URL. The pooler needs `postgres.<ref>`.
+- Anything about prepared statements — you used the `6543` transaction pooler for
+  `DIRECT_URL`. Migrations need session mode.
 
 **Everything 401s.** The access token is 15 minutes. The client refreshes automatically; if
 refresh fails it signs you out to the auth stack rather than looping.

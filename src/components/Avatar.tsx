@@ -9,28 +9,37 @@ import {
   type ViewStyle,
 } from 'react-native';
 
+import { isAvatarUrl, resolveAvatar } from '../constants/avatars';
 import {
   avatarRadius,
   contextColors,
-  fern,
+  marmalade,
   text,
   type ContextName,
 } from '../theme';
 
 /**
- * Avatars are squircles by default — circle-only avatars read as generic. `circle` stays
- * available for the few places a round crop is genuinely right, such as an author chip
- * sitting on a photo.
+ * Avatars are circles by default.
+ *
+ * They were squircles, on the reasoning that circle avatars read as generic. In this
+ * product they read as *photos*: every avatar here sits either on a cat photograph or in
+ * a row beside one, and at 36–64pt a rounded square is indistinguishable from a thumbnail
+ * of a cat. The round crop is what says "this is a person" — which is the only thing the
+ * shape has to communicate. `squircle` stays available for the shop's frame previews.
  *
  * No "egg" placeholder icon. A missing avatar falls back to the player's initials over a
  * tinted surface, which is both more distinctive and more informative.
+ *
+ * `uri` accepts either a real image URL or a `catsnap://avatar/<id>` identity from the
+ * built-in set. The scheme is resolved here rather than passed to `<Image>`, which has no
+ * handler for it and raises "No suitable URL request handler found".
  */
 export const Avatar = React.memo(function Avatar({
   uri,
   name,
   size = 44,
-  shape = 'squircle',
-  context = 'bone',
+  shape = 'circle',
+  context = 'paper',
   style,
 }: {
   uri?: string | null;
@@ -52,7 +61,34 @@ export const Avatar = React.memo(function Avatar({
     .map((part) => part[0]?.toUpperCase() ?? '')
     .join('');
 
-  if (uri) {
+  const swatch = resolveAvatar(uri);
+
+  if (swatch) {
+    return (
+      <View
+        accessible
+        accessibilityLabel={name ? `${name}'s avatar` : 'Player avatar'}
+        style={[
+          styles.fallback,
+          { width: size, height: size, borderRadius, backgroundColor: swatch.hue },
+          style,
+        ]}
+      >
+        <Text
+          style={[
+            text.h3,
+            { color: '#FFFFFF', fontSize: Math.max(11, size * 0.36) },
+          ]}
+        >
+          {initials || '?'}
+        </Text>
+      </View>
+    );
+  }
+
+  // An unresolved `catsnap:` URL — a retired avatar id — drops through to initials rather
+  // than reaching the image loader, which would throw on the scheme.
+  if (uri && !isAvatarUrl(uri)) {
     return (
       <Image
         source={{ uri }}
@@ -73,14 +109,14 @@ export const Avatar = React.memo(function Avatar({
       accessibilityLabel={name ? `${name}'s avatar` : 'Player avatar'}
       style={[
         styles.fallback,
-        { width: size, height: size, borderRadius, backgroundColor: fern[100] },
+        { width: size, height: size, borderRadius, backgroundColor: marmalade[100] },
         style,
       ]}
     >
       <Text
         style={[
           text.h3,
-          { color: fern[700], fontSize: Math.max(11, size * 0.36) },
+          { color: marmalade[700], fontSize: Math.max(11, size * 0.36) },
         ]}
       >
         {initials || '?'}

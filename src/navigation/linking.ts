@@ -27,6 +27,16 @@ export const linking: LinkingOptions<RootStackParamList> = {
 
       MainTabs: {
         screens: {
+          HomeTab: {
+            screens: {
+              // The bare app link lands on the viral feed. Its PhotoDetail and
+              // PublicProfile are intentionally unlinked: those paths already resolve
+              // into the album and challenges stacks, and two routes claiming one path
+              // means whichever is declared first silently wins.
+              ViralFeed: '',
+            },
+          },
+
           MapTab: {
             screens: {
               Map: 'map',

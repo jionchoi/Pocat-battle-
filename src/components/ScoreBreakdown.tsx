@@ -20,7 +20,7 @@ import { SCORE_LABELS } from '../constants/game';
 import type { PhotoScores, PoseClass, Rarity } from '../models';
 import {
   contextColors,
-  fern,
+  marmalade,
   perpetual,
   poseLabel,
   radii,
@@ -53,11 +53,26 @@ export interface ScoreBreakdownProps {
   badges: string[];
   /** Animate the tally. False on Photo Detail, where the result is already known. */
   animate?: boolean;
+  /** Hide the total row, for surfaces that already show the score at display size. */
+  showTotal?: boolean;
   context?: ContextName;
   style?: StyleProp<ViewStyle>;
 }
 
 const ROW_STAGGER_MS = 120;
+
+/**
+ * Each component gets its own fill hue, borrowed from the rarity ramp rather than
+ * invented: composition is the accent because it is the one a player can actually
+ * practise, and the two rarity rows take the hues of the tiers they produce. Three
+ * identical coral bars would make the breakdown read as one number split three ways,
+ * which is the opposite of what it is for.
+ */
+const COMPONENT_FILL = {
+  composition: marmalade[600],
+  poseRarity: rarityTokens.Epic.base,
+  catRarity: rarityTokens.Rare.base,
+} as const;
 
 export const ScoreBreakdown = React.memo(function ScoreBreakdown({
   scores,
@@ -65,7 +80,8 @@ export const ScoreBreakdown = React.memo(function ScoreBreakdown({
   tier,
   badges,
   animate = false,
-  context = 'bone',
+  showTotal = true,
+  context = 'paper',
   style,
 }: ScoreBreakdownProps) {
   const c = contextColors(context);
@@ -77,20 +93,27 @@ export const ScoreBreakdown = React.memo(function ScoreBreakdown({
         <ScoreMeter
           label={SCORE_LABELS.composition}
           value={scores.composition}
+          color={COMPONENT_FILL.composition}
           context={context}
           animate={animate}
           delayMs={0}
         />
+        {/* The pose name is the row's whole teaching value — "Mid-yawn 95" tells the
+            player what earned the score, where a bare 95 teaches them nothing. It is the
+            one label that will not fit on an inline row, so this row stacks. */}
         <ScoreMeter
           label={`${SCORE_LABELS.poseRarity} · ${poseLabel[pose]}`}
           value={scores.poseRarity}
+          color={COMPONENT_FILL.poseRarity}
           context={context}
+          layout="stacked"
           animate={animate}
           delayMs={ROW_STAGGER_MS}
         />
         <ScoreMeter
           label={SCORE_LABELS.catRarity}
           value={scores.catRarity}
+          color={COMPONENT_FILL.catRarity}
           context={context}
           animate={animate}
           delayMs={ROW_STAGGER_MS * 2}
@@ -106,23 +129,35 @@ export const ScoreBreakdown = React.memo(function ScoreBreakdown({
         ) : null}
       </View>
 
-      <View style={[styles.totalRow, { borderTopColor: c.hairline }]}>
-        <View>
-          <Text style={[text.caption, { color: c.textMuted }]}>Total</Text>
-          <Text style={[text.bodySm, { color: spec.label }]}>{tier}</Text>
-        </View>
+      {showTotal ? (
+        <View style={[styles.totalRow, { borderTopColor: c.hairline }]}>
+          <View>
+            <Text style={[text.caption, { color: c.textMuted }]}>Total</Text>
+            <Text style={[text.bodySm, { color: spec.label }]}>{tier}</Text>
+          </View>
 
-        <TotalValue total={scores.total} animate={animate} context={context} />
-      </View>
+          <TotalValue total={scores.total} animate={animate} context={context} />
+        </View>
+      ) : null}
 
       {badges.length > 0 ? (
         <View style={styles.badges}>
           {badges.map((badge) => (
             <View
               key={badge}
-              style={[styles.badge, { backgroundColor: fern[100], borderColor: spec.ring }]}
+              style={[
+                styles.badge,
+                { backgroundColor: context === 'arena' ? c.surface : marmalade[100] },
+              ]}
             >
-              <Text style={[text.caption, { color: fern[700] }]}>{badge}</Text>
+              <Text
+                style={[
+                  text.caption,
+                  { color: context === 'arena' ? c.text : marmalade[700] },
+                ]}
+              >
+                {badge}
+              </Text>
             </View>
           ))}
         </View>
@@ -232,9 +267,8 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
   },
   badge: {
-    paddingHorizontal: spacing.xs,
-    paddingVertical: 4,
-    borderRadius: radii.sm,
-    borderWidth: 1,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    borderRadius: radii.full,
   },
 });

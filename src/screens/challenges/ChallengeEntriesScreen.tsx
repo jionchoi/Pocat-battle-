@@ -15,7 +15,7 @@ import { usePhotoImpressions } from '../../hooks/usePhotoImpressions';
 import { VoteRow } from '../../components/VoteButton';
 import type { PhotoWithAuthor, Reaction } from '../../models';
 import { useAuthStore } from '../../store/authStore';
-import { bone, layout, spacing, text } from '../../theme';
+import { paper, layout, spacing, text } from '../../theme';
 import type { ChallengesStackParamList } from '../../navigation/types';
 
 /**
@@ -117,7 +117,7 @@ export function ChallengeEntriesScreen({ route, navigation }: Props) {
     ({ item, index }: { item: PhotoWithAuthor; index: number }) => (
       <View style={styles.entry}>
         <View style={styles.authorRow}>
-          <Text style={[text.stat, styles.rank, { color: bone.textMuted }]}>
+          <Text style={[text.stat, styles.rank, { color: paper.textMuted }]}>
             {index + 1}
           </Text>
           <Avatar
@@ -215,7 +215,7 @@ const styles = StyleSheet.create({
   },
   author: {
     flex: 1,
-    color: bone.text,
+    color: paper.text,
   },
   votes: {
     marginTop: spacing.xs,

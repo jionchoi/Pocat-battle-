@@ -15,7 +15,7 @@ import { socialApi } from '../../api/endpoints';
 import type { ChallengesStackParamList } from '../../navigation/types';
 import { rankTitle } from '../../constants/game';
 import type { User } from '../../models';
-import { bone, spacing, text } from '../../theme';
+import { paper, spacing, text } from '../../theme';
 
 /**
  * Friends.
@@ -144,7 +144,7 @@ export function FriendsListScreen({ navigation }: Props) {
           {searching ? (
             <SkeletonList count={3} />
           ) : results.length === 0 ? (
-            <Text style={[text.bodySm, { color: bone.textFaint }]}>
+            <Text style={[text.bodySm, { color: paper.textFaint }]}>
               No trainer by that name.
             </Text>
           ) : (
@@ -276,17 +276,17 @@ const Row = React.memo(function Row({
         styles.row,
         index > 0 && {
           borderTopWidth: StyleSheet.hairlineWidth,
-          borderTopColor: bone.hairline,
+          borderTopColor: paper.hairline,
         },
       ]}
     >
       <Avatar name={user.username} size={40} />
 
       <View style={styles.rowBody}>
-        <Text style={[text.body, { color: bone.text }]} numberOfLines={1}>
+        <Text style={[text.body, { color: paper.text }]} numberOfLines={1}>
           {user.username}
         </Text>
-        <Text style={[text.caption, { color: bone.textFaint }]}>
+        <Text style={[text.caption, { color: paper.textFaint }]}>
           {rankTitle(user.photographerRank)}
         </Text>
       </View>

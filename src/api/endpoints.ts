@@ -197,9 +197,46 @@ export interface FeedQuery {
   [key: string]: string | number | boolean | undefined;
 }
 
+/** How far back the ranking looks. The server widens this when a window is too thin. */
+export type ViralWindow = 'today' | 'week' | 'all';
+
+export interface ViralQuery {
+  window?: ViralWindow;
+  /** A rank is a position in a computed ordering, so paging here is an offset, not a cursor. */
+  offset?: number;
+  limit?: number;
+  [key: string]: string | number | boolean | undefined;
+}
+
+export interface ViralPage {
+  /** The rail. Empty on every page but the first. */
+  trending: PhotoWithAuthor[];
+  /** The wall below it. */
+  rising: PhotoWithAuthor[];
+  /** What the server actually ranked over — may be wider than what was asked for. */
+  window: ViralWindow;
+  nextOffset: number | null;
+}
+
 export const feedApi = {
   list: (query: FeedQuery = {}) =>
     api.get<{ photos: PhotoWithAuthor[]; nextCursor: string | null }>('/feed', { query }),
+
+  /**
+   * The ranked home feed.
+   *
+   * Sent **anonymously on purpose**. The response is public and identical for every
+   * reader, so leaving the `Authorization` header off is what allows a CDN to serve it
+   * from the edge — a request carrying a bearer token is uncacheable by definition, and at
+   * scale that single header is the difference between one origin request per refresh
+   * interval and one per user.
+   *
+   * The consequence is that `myReaction` arrives null on every photo. That is not missing
+   * data: it is *this reader's own action*, which the client already knows, and
+   * `reactionStore` overlays it. See the note there.
+   */
+  viral: (query: ViralQuery = {}, signal?: AbortSignal) =>
+    api.get<ViralPage>('/feed/viral', { query, signal, anonymous: true }),
 };
 
 /* --------------------------------- social --------------------------------- */

@@ -10,7 +10,7 @@ import Animated, {
 
 import {
   contextColors,
-  fern,
+  marmalade,
   radii,
   spacing,
   text,
@@ -41,10 +41,10 @@ export interface MeterBarProps {
 /** Rank XP and album-quota progress. Hairline track, accent fill. */
 export const MeterBar = React.memo(function MeterBar({
   ratio,
-  color = fern[600],
+  color = marmalade[600],
   trackColor,
   height = 6,
-  context = 'bone',
+  context = 'paper',
   label,
   valueLabel,
   style,
@@ -98,17 +98,26 @@ export const MeterBar = React.memo(function MeterBar({
 });
 
 /**
- * One row of the score breakdown: a labelled 0-100 component with a mono value.
+ * One row of the score breakdown: a labelled 0-100 component with its value.
+ *
+ * Two layouts, and the choice is about how many rows are stacked:
+ *
+ *  - `inline` puts label, track and value on one line. Three of these read as a small
+ *    table, which is what the breakdown is — and at 3 rows it costs 66pt instead of 132.
+ *  - `stacked` puts the label above the track, for rows whose label is long enough to
+ *    need the full width ("Pose rarity · Mid-yawn").
  *
  * Score components animate `scaleX` from zero on mount so the reveal reads as the score
- * being tallied rather than as four bars that were always there.
+ * being tallied rather than as bars that were always there.
  */
 export const ScoreMeter = React.memo(function ScoreMeter({
   label,
   value,
   max = 100,
-  color = fern[600],
-  context = 'bone',
+  color = marmalade[600],
+  context = 'paper',
+  layout = 'inline',
+  labelWidth = 92,
   delayMs = 0,
   animate = true,
   style,
@@ -118,7 +127,10 @@ export const ScoreMeter = React.memo(function ScoreMeter({
   max?: number;
   color?: string;
   context?: ContextName;
-  /** Stagger, so the four components tally in sequence during the reveal. */
+  layout?: 'inline' | 'stacked';
+  /** Fixed so the three tracks start on a common left edge and stay comparable. */
+  labelWidth?: number;
+  /** Stagger, so the components tally in sequence during the reveal. */
   delayMs?: number;
   animate?: boolean;
   style?: StyleProp<ViewStyle>;
@@ -145,23 +157,43 @@ export const ScoreMeter = React.memo(function ScoreMeter({
     transform: [{ scaleX: Math.max(0.001, progress.value) }],
   }));
 
+  const track = (
+    <View
+      style={[styles.track, { height: 6, backgroundColor: c.meterTrack }]}
+      accessibilityRole="progressbar"
+      accessibilityLabel={label}
+      accessibilityValue={{ now: Math.round(value), min: 0, max }}
+    >
+      <Animated.View
+        style={[styles.fill, { backgroundColor: color, borderRadius: 3 }, fill]}
+      />
+    </View>
+  );
+
+  if (layout === 'inline') {
+    return (
+      <View style={[styles.inlineRow, style]}>
+        <Text
+          style={[text.caption, { width: labelWidth, color: c.textMuted }]}
+          numberOfLines={1}
+        >
+          {label}
+        </Text>
+        <View style={styles.inlineTrack}>{track}</View>
+        <Text style={[text.stat, styles.inlineValue, { color: c.text }]}>
+          {Math.round(value)}
+        </Text>
+      </View>
+    );
+  }
+
   return (
     <View style={style}>
       <View style={styles.labelRow}>
         <Text style={[text.bodySm, { color: c.textMuted }]}>{label}</Text>
         <Text style={[text.stat, { color: c.text }]}>{Math.round(value)}</Text>
       </View>
-
-      <View
-        style={[styles.track, { height: 6, backgroundColor: c.meterTrack }]}
-        accessibilityRole="progressbar"
-        accessibilityLabel={label}
-        accessibilityValue={{ now: Math.round(value), min: 0, max }}
-      >
-        <Animated.View
-          style={[styles.fill, { backgroundColor: color, borderRadius: 3 }, fill]}
-        />
-      </View>
+      {track}
     </View>
   );
 });
@@ -180,8 +212,10 @@ export const FramingRing = React.memo(function FramingRing({
   progress,
   size = 92,
   thickness = 4,
-  color = '#F5F1EB',
-  trackColor = 'rgba(245, 241, 235, 0.22)',
+  // The accent, not white: the ring is the one thing on the camera the player is meant
+  // to act on, and white would make it just another piece of the viewfinder's furniture.
+  color = marmalade[600],
+  trackColor = 'rgba(255, 255, 255, 0.2)',
 }: {
   /** 0..1 through the window. */
   progress: number;
@@ -252,6 +286,18 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'baseline',
     marginBottom: spacing.xxs,
+  },
+  inlineRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  inlineTrack: {
+    flex: 1,
+  },
+  inlineValue: {
+    minWidth: 24,
+    textAlign: 'right',
   },
   value: {
     fontSize: 12,

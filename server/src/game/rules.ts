@@ -432,6 +432,94 @@ export function hasConfidentCommunityScore(views: number): boolean {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Viral ranking                                                              */
+/* -------------------------------------------------------------------------- */
+
+export const VIRAL = {
+  /** A reaction is a deliberate act; a view is passive. One reaction ≈ twelve views. */
+  reactionWeight: 3,
+  viewWeight: 0.25,
+
+  /**
+   * Seconds of freshness that one order of magnitude of engagement is worth.
+   *
+   * 45,000s ≈ 12.5 hours: a photo with 10× the reactions of another outranks it until it
+   * is half a day older. This single number is the entire feel of the feed — lower it and
+   * the app becomes a firehose of whatever was posted in the last hour, raise it and
+   * yesterday's hits refuse to leave the rail.
+   */
+  decaySeconds: 45_000,
+
+  /**
+   * Quality shading, applied inside the log. Bounded 0.5–1.0 so a photo that got its
+   * numbers from raw exposure is halved, but quality can never outrank magnitude — this
+   * ranks *viral*, not *best*. `communityScore` already has reach in its denominator.
+   */
+  qualityFloor: 0.5,
+  qualityRange: 0.5,
+} as const;
+
+/**
+ * Viral score. **Time-invariant** — this is the load-bearing property of the whole feed.
+ *
+ *     hotScore = log10(max(E, 1)) + capturedAtSeconds / 45000
+ *     where E = (3·reactions + 0.25·views) · quality
+ *
+ * ## Why it is written this way
+ *
+ * The obvious formulation is gravity — engagement divided by `(age + 2)^1.6`, the way
+ * Hacker News does it. It produces good rankings and it is unusable at scale, because
+ * `age` means the score of every row changes every second. A score containing the current
+ * time cannot be stored in an index, cannot be cached for even a second, and cannot be
+ * precomputed by a job. Every request has to sort the entire candidate set. That is fine
+ * at a thousand photos and catastrophic at ten million.
+ *
+ * Log-space decay gives the same *ordering* with none of that cost. Compare two photos
+ * under continuous exponential decay:
+ *
+ *     Eᵢ·e^(−λ(t−tᵢ)) > Eⱼ·e^(−λ(t−tⱼ))
+ *     ⟺ ln Eᵢ − λt + λtᵢ > ln Eⱼ − λt + λtⱼ
+ *     ⟺ ln Eᵢ + λtᵢ     > ln Eⱼ + λtⱼ
+ *
+ * The current time cancels. The comparison is the same at every instant, so the score is
+ * a constant that only moves when engagement moves — which makes it a B-tree key, a Redis
+ * ZSET score, and a cacheable ordering, all at once. Old photos still sink; nothing has to
+ * be rescored for that to happen. (This is the shape Reddit's "hot" ranking uses, for the
+ * same reason.)
+ *
+ * `log10` also does real product work: it compresses the head. Without it the photo with
+ * 40,000 reactions sits on top of the rail for a week and no new photo can ever displace
+ * it. In log space, beating it costs one more order of magnitude — or half a day of being
+ * newer.
+ */
+export function hotScore(params: {
+  reactions: number;
+  views: number;
+  communityScore: number;
+  capturedAt: Date;
+}): number {
+  const quality =
+    VIRAL.qualityFloor +
+    (VIRAL.qualityRange * clamp(params.communityScore, 0, COMMUNITY.scoreScale)) /
+      COMMUNITY.scoreScale;
+
+  const engagement =
+    (VIRAL.reactionWeight * Math.max(0, params.reactions) +
+      VIRAL.viewWeight * Math.max(0, params.views)) *
+    quality;
+
+  // `max(E, 1)` keeps log10 defined and pins every zero-engagement photo to the same
+  // baseline, so among photos nobody has touched yet the ordering is purely chronological.
+  const magnitude = Math.log10(Math.max(engagement, 1));
+  const age = params.capturedAt.getTime() / 1000 / VIRAL.decaySeconds;
+
+  // Six decimal places is far finer than any real ranking gap and keeps the float stable
+  // across the Postgres/Redis round trip, where a full-precision double would otherwise
+  // reformat and cause spurious ZADD writes.
+  return Math.round((magnitude + age) * 1e6) / 1e6;
+}
+
+/* -------------------------------------------------------------------------- */
 /* Photographer Rank (README 1: cosmetic progression, never power)            */
 /* -------------------------------------------------------------------------- */
 

@@ -249,6 +249,17 @@ model Photo {
   // what drives Photographer Rank and the leaderboards.
   communityScore Int @default(0)
 
+  /// Viral ranking score. See `hotScore()` in game/rules.ts.
+  ///
+  /// Time-invariant by construction: engagement in log space plus the capture timestamp
+  /// on a linear ramp. Ordering by this static number is equivalent to ordering by a
+  /// continuously decaying score, because the current time cancels out of the comparison.
+  ///
+  /// That property is the reason this is a column at all. A score containing NOW() cannot
+  /// be indexed, cached, or precomputed — every feed request would have to sort the whole
+  /// table. This one is a plain float in a B-tree.
+  hotScore Float @default(0)
+
   // Editorial boost for cold start. A brand-new app has no organic voting volume, so
   // a light curation pass seeds the feed until it is self-sustaining.
   featured   Boolean   @default(false)
@@ -279,6 +290,11 @@ model Photo {
   @@index([sharedToFeed, capturedAt])
   // Serves community-score ranking and vote-judged challenges.
   @@index([sharedToFeed, communityScore])
+  // Serves the viral feed: a 24-row index scan instead of a sort of the whole window.
+  // This is the fallback path — Redis serves it normally — and the cold-rebuild source.
+  @@index([sharedToFeed, hotScore])
+  // Window trimming and the Redis ZSET rebuild both walk shared photos by age.
+  @@index([sharedToFeed, capturedAt, hotScore])
   // Serves the featured rail at the top of the feed's first page.
   @@index([featured, featuredAt])
 }

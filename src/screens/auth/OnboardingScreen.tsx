@@ -16,8 +16,8 @@ import { Eyebrow } from '../../components/Badge';
 import { Screen } from '../../components/Screen';
 import type { AuthStackParamList } from '../../navigation/types';
 import {
-  bone,
-  fern,
+  paper,
+  marmalade,
   icon,
   measure,
   radii,
@@ -125,7 +125,7 @@ export function OnboardingScreen({ navigation }: Props) {
         renderItem={({ item }) => (
           <View style={[styles.slide, { width }]}>
             <View style={styles.glyphWell}>
-              <item.Glyph size={34} color={fern[600]} weight={icon.weightDefault} />
+              <item.Glyph size={34} color={marmalade[600]} weight={icon.weightDefault} />
             </View>
 
             <Eyebrow label={item.eyebrow} style={styles.eyebrow} />
@@ -146,7 +146,7 @@ export function OnboardingScreen({ navigation }: Props) {
               style={[
                 styles.dot,
                 {
-                  backgroundColor: i === index ? fern[600] : bone.hairlineHi,
+                  backgroundColor: i === index ? marmalade[600] : paper.hairlineHi,
                   width: i === index ? 18 : 6,
                 },
               ]}
@@ -188,7 +188,7 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: radii.xxl,
-    backgroundColor: fern[100],
+    backgroundColor: marmalade[100],
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: spacing.xl,
@@ -197,11 +197,11 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   title: {
-    color: bone.text,
+    color: paper.text,
     maxWidth: measure,
   },
   body: {
-    color: bone.textMuted,
+    color: paper.textMuted,
     marginTop: spacing.sm,
     maxWidth: measure,
   },

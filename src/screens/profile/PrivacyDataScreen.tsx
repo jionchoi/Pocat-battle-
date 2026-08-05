@@ -7,7 +7,7 @@ import { ConfirmSheet } from '../../components/BottomSheet';
 import { Screen, ScreenHeader, SectionHeader } from '../../components/Screen';
 import { TextField } from '../../components/TextField';
 import { showToast } from '../../components/Toast';
-import { bone, measure, spacing, text } from '../../theme';
+import { paper, measure, spacing, text } from '../../theme';
 import { clearLocalData } from '../../services/database';
 import { useAuthStore } from '../../store/authStore';
 import { useAlbumStore } from '../../store/albumStore';
@@ -98,7 +98,7 @@ export function PrivacyDataScreen() {
         <DividedGroup>
           {STORED.map((item) => (
             <View key={item.label} style={styles.row}>
-              <Text style={[text.h3, { color: bone.text }]}>{item.label}</Text>
+              <Text style={[text.h3, { color: paper.text }]}>{item.label}</Text>
               <Text style={[text.bodySm, styles.detail]}>{item.detail}</Text>
             </View>
           ))}
@@ -181,7 +181,7 @@ const styles = StyleSheet.create({
     gap: spacing.xxs,
   },
   detail: {
-    color: bone.textMuted,
+    color: paper.textMuted,
     maxWidth: measure,
   },
   list: {
@@ -196,14 +196,14 @@ const styles = StyleSheet.create({
     width: 4,
     height: 4,
     borderRadius: 2,
-    backgroundColor: bone.textFaint,
+    backgroundColor: paper.textFaint,
     marginTop: 8,
   },
   confirmField: {
     marginTop: spacing.md,
   },
   footnote: {
-    color: bone.textFaint,
+    color: paper.textFaint,
     marginTop: spacing.xl,
     maxWidth: measure,
   },

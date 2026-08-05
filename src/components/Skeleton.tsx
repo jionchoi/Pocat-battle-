@@ -11,7 +11,6 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import {
-  concentric,
   contextColors,
   perpetual,
   radii,
@@ -37,7 +36,7 @@ export const SkeletonBlock = React.memo(function SkeletonBlock({
   height,
   radius = radii.xs,
   index = 0,
-  context = 'bone',
+  context = 'paper',
   style,
 }: {
   width?: number | `${number}%`;
@@ -89,10 +88,10 @@ export const SkeletonBlock = React.memo(function SkeletonBlock({
   );
 });
 
-/** Matches PhotoCard's Double-Bezel geometry exactly. */
+/** Matches PhotoCard's geometry exactly, so nothing shifts when the real card mounts. */
 export const PhotoCardSkeleton = React.memo(function PhotoCardSkeleton({
   index = 0,
-  context = 'bone',
+  context = 'paper',
 }: {
   index?: number;
   context?: ContextName;
@@ -100,25 +99,17 @@ export const PhotoCardSkeleton = React.memo(function PhotoCardSkeleton({
   const c = contextColors(context);
 
   return (
-    <View
-      style={[
-        styles.cardShell,
-        { backgroundColor: c.sunken, borderColor: c.hairline },
-      ]}
-    >
-      <View style={[styles.cardCore, { backgroundColor: c.surface }]}>
-        <SkeletonBlock
-          width="100%"
-          height={0}
-          index={index}
-          context={context}
-          style={styles.cardPhoto}
-        />
-        <View style={styles.cardMeta}>
-          <SkeletonBlock width="68%" height={11} index={index} context={context} />
-          <SkeletonBlock width="44%" height={9} index={index + 1} context={context} />
-          <SkeletonBlock width="32%" height={9} index={index + 2} context={context} />
-        </View>
+    <View style={[styles.card, { backgroundColor: c.surface }]}>
+      <SkeletonBlock
+        width="100%"
+        height={0}
+        index={index}
+        context={context}
+        style={styles.cardPhoto}
+      />
+      <View style={styles.cardMeta}>
+        <SkeletonBlock width="68%" height={11} index={index} context={context} />
+        <SkeletonBlock width="44%" height={9} index={index + 1} context={context} />
       </View>
     </View>
   );
@@ -127,7 +118,7 @@ export const PhotoCardSkeleton = React.memo(function PhotoCardSkeleton({
 /** Leaderboard / friends row. Hairline-separated, so no card geometry to match. */
 export const SkeletonRow = React.memo(function SkeletonRow({
   index = 0,
-  context = 'bone',
+  context = 'paper',
   showAvatar = true,
 }: {
   index?: number;
@@ -159,7 +150,7 @@ export const SkeletonPin = React.memo(function SkeletonPin({
 
 export const SkeletonList = React.memo(function SkeletonList({
   count = 8,
-  context = 'bone',
+  context = 'paper',
   showAvatar = true,
 }: {
   count?: number;
@@ -186,18 +177,10 @@ export const SkeletonList = React.memo(function SkeletonList({
   );
 });
 
-const CARD_RADIUS = radii.xl;
-const SHELL_PAD = 6;
-
 const styles = StyleSheet.create({
-  cardShell: {
+  card: {
     flex: 1,
-    borderRadius: CARD_RADIUS,
-    borderWidth: 1,
-    padding: SHELL_PAD,
-  },
-  cardCore: {
-    borderRadius: concentric(CARD_RADIUS, SHELL_PAD),
+    borderRadius: radii.lg,
     overflow: 'hidden',
   },
   cardPhoto: {
@@ -207,7 +190,9 @@ const styles = StyleSheet.create({
     borderRadius: 0,
   },
   cardMeta: {
-    padding: spacing.sm,
+    paddingHorizontal: spacing.xs + 2,
+    paddingTop: spacing.xs,
+    paddingBottom: spacing.xs + 2,
     gap: spacing.xxs,
   },
   row: {

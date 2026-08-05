@@ -12,16 +12,14 @@ import { Image } from 'expo-image';
 import { Sparkle } from 'phosphor-react-native';
 
 import type { Cat } from '../models';
+import { RarityBadge } from './Badge';
 import {
-  bezelPad,
-  concentric,
+  chrome,
   contextColors,
-  fern,
-  icon,
-  innerHighlight,
+  marmalade,
+  photoScrim,
   press,
   radii,
-  rarity as rarityTokens,
   spacing,
   staggerDelay,
   text,
@@ -32,17 +30,21 @@ import {
 /**
  * CatDexEntry — one recurring real cat (README section 6).
  *
- * Shows the player's best shot of the cat, their name for it, and how many times they
- * have photographed it. The encounter count is the relationship: it is what turns "a
- * tabby I saw once" into "the tabby on my street", which is the whole point of the Dex
- * replacing a raise-a-pet system.
+ * A square crop of the player's best shot, the tier worn as a disc in the corner, and
+ * their name for the cat centred underneath. Three across, so the tile is roughly 110pt
+ * and there is room for exactly one line of chrome on the image.
+ *
+ * The encounter count rides *on* the photo rather than as a second line below it. It is
+ * the whole point of the Dex — it is what turns "a tabby I saw once" into "the tabby on
+ * my street" — but a second text line under every tile adds 15pt to a nine-row grid and
+ * pushes the name away from the face it belongs to. On the image it costs nothing.
  */
 
 export const CatDexEntry = React.memo(function CatDexEntry({
   cat,
   onPress,
   index = 0,
-  context = 'bone',
+  context = 'paper',
   style,
 }: {
   cat: Cat;
@@ -52,7 +54,6 @@ export const CatDexEntry = React.memo(function CatDexEntry({
   style?: StyleProp<ViewStyle>;
 }) {
   const c = contextColors(context);
-  const spec = rarityTokens[cat.bestTier];
   const reduceMotion = useReduceMotion();
 
   const pressed = useSharedValue(0);
@@ -92,93 +93,100 @@ export const CatDexEntry = React.memo(function CatDexEntry({
           pressed.value = withSpring(0, press.config);
         }}
         accessibilityRole="button"
-        accessibilityLabel={`${cat.nickname ?? 'Unnamed cat'}, ${encounterLabel}${
+        accessibilityLabel={`${cat.nickname ?? 'Unnamed cat'}, ${cat.bestTier}, ${encounterLabel}${
           cat.discoveredByMe ? ', discovered by you' : ''
         }`}
-        style={[
-          styles.shell,
-          { backgroundColor: spec.shellTint, borderColor: spec.ring },
-        ]}
+        style={styles.wrap}
       >
-        <View
-          style={[
-            styles.core,
-            { backgroundColor: c.surface },
-            innerHighlight(c.innerHighlight),
-          ]}
-        >
-          <View style={styles.photo}>
-            <Image
-              source={cat.bestPhotoUrl || undefined}
-              contentFit="cover"
-              transition={200}
-              style={StyleSheet.absoluteFill}
-              accessible={false}
-            />
-            {!cat.bestPhotoUrl ? (
-              <View style={[styles.noPhoto, { backgroundColor: c.sunken }]}>
-                <Text style={[text.caption, { color: c.textFaint }]}>No image</Text>
-              </View>
-            ) : null}
+        <View style={[styles.tile, { backgroundColor: c.sunken }]}>
+          <Image
+            source={cat.bestPhotoUrl || undefined}
+            contentFit="cover"
+            transition={200}
+            style={StyleSheet.absoluteFill}
+            accessible={false}
+          />
+          {!cat.bestPhotoUrl ? (
+            <View style={styles.noPhoto}>
+              <Text style={[text.caption, { color: c.textFaint }]}>No image</Text>
+            </View>
+          ) : null}
 
-            {/* The discoverer mark. First-to-find is the only status in this app that
-                cannot be bought or out-ground, so it gets a permanent badge. */}
+          {/* Only under the count, so a tile with nothing written on it stays clean. */}
+          {cat.encounterCount > 1 ? (
+            <View pointerEvents="none" style={styles.countScrim} />
+          ) : null}
+
+          <View style={styles.corner} pointerEvents="none">
+            {/* First-to-find is the only status in this app that cannot be bought or
+                out-ground, so it gets a permanent mark of its own beside the tier. */}
             {cat.discoveredByMe ? (
               <View style={styles.discovered}>
-                <Sparkle size={11} color={fern[700]} weight={icon.weightActive} />
+                <Sparkle size={9} weight="fill" color={marmalade[600]} />
               </View>
             ) : null}
+            <RarityBadge rarity={cat.bestTier} size="sm" compact />
           </View>
 
-          <View style={styles.meta}>
-            <Text style={[text.bodySm, { color: c.text }]} numberOfLines={1}>
-              {cat.nickname ?? 'Unnamed cat'}
-            </Text>
-            <Text style={[text.caption, { color: c.textMuted }]} numberOfLines={1}>
-              {encounterLabel}
-            </Text>
-          </View>
+          {cat.encounterCount > 1 ? (
+            <Text style={[text.statSm, styles.count]}>{`×${cat.encounterCount}`}</Text>
+          ) : null}
         </View>
+
+        <Text style={[text.caption, styles.name, { color: c.text }]} numberOfLines={1}>
+          {cat.nickname ?? 'Unnamed'}
+        </Text>
       </Pressable>
     </Animated.View>
   );
 });
 
-const OUTER_RADIUS = radii.lg + 4;
-
 const styles = StyleSheet.create({
-  shell: {
-    borderWidth: 1,
-    borderRadius: OUTER_RADIUS,
-    padding: bezelPad,
+  wrap: {
+    gap: 5,
   },
-  core: {
-    borderRadius: concentric(OUTER_RADIUS, bezelPad),
-    overflow: 'hidden',
-  },
-  photo: {
+  tile: {
     width: '100%',
     aspectRatio: 1,
+    borderRadius: radii.lg,
+    overflow: 'hidden',
+    justifyContent: 'flex-end',
   },
   noPhoto: {
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  discovered: {
+  countScrim: {
     position: 'absolute',
-    top: spacing.xxs,
-    right: spacing.xxs,
-    width: 20,
-    height: 20,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '34%',
+    backgroundColor: photoScrim.cardBottom,
+  },
+  corner: {
+    position: 'absolute',
+    top: 5,
+    right: 5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  discovered: {
+    width: 16,
+    height: 16,
     borderRadius: radii.full,
-    backgroundColor: fern[100],
+    backgroundColor: marmalade[100],
     alignItems: 'center',
     justifyContent: 'center',
   },
-  meta: {
-    paddingHorizontal: spacing.xs,
-    paddingVertical: spacing.xs,
-    gap: 1,
+  count: {
+    color: chrome.text,
+    paddingHorizontal: 7,
+    paddingBottom: 6,
+  },
+  name: {
+    textAlign: 'center',
   },
 });

@@ -7,7 +7,7 @@ import { Screen, ScreenHeader } from '../../components/Screen';
 import { TextField } from '../../components/TextField';
 import { InlineError } from '../../components/EmptyState';
 import type { AuthStackParamList } from '../../navigation/types';
-import { bone, measure, spacing, text } from '../../theme';
+import { paper, measure, spacing, text } from '../../theme';
 import { useAuthStore } from '../../store/authStore';
 
 /**
@@ -62,9 +62,10 @@ export function SignInSignUpScreen({ navigation }: Props) {
 
     try {
       if (mode === 'signup') {
+        // No navigation here: signing up authenticates, and the root navigator sends a
+        // fresh account to the avatar step. Replacing a screen on a stack that is being
+        // unmounted in the same commit is how that step got skipped.
         await signup({ email: email.trim(), password, username: username.trim() });
-        // A fresh account picks its avatar next; the root navigator handles the rest.
-        navigation.replace('UsernameSetup');
       } else {
         await login({ email: email.trim(), password });
       }
@@ -142,7 +143,7 @@ export function SignInSignUpScreen({ navigation }: Props) {
 
       <View style={styles.divider}>
         <View style={styles.dividerLine} />
-        <Text style={[text.caption, { color: bone.textFaint }]}>or</Text>
+        <Text style={[text.caption, { color: paper.textFaint }]}>or</Text>
         <View style={styles.dividerLine} />
       </View>
 
@@ -215,13 +216,13 @@ const styles = StyleSheet.create({
   dividerLine: {
     flex: 1,
     height: StyleSheet.hairlineWidth,
-    backgroundColor: bone.hairlineHi,
+    backgroundColor: paper.hairlineHi,
   },
   social: {
     gap: spacing.xs,
   },
   socialNote: {
-    color: bone.textFaint,
+    color: paper.textFaint,
     marginTop: spacing.xxs,
   },
   footer: {
@@ -229,7 +230,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   legal: {
-    color: bone.textFaint,
+    color: paper.textFaint,
     maxWidth: measure,
   },
 });

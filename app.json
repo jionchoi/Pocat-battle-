@@ -6,17 +6,19 @@
     "orientation": "portrait",
     "scheme": "catsnap",
     "userInterfaceStyle": "light",
-    "icon": "./src/assets/icon.png",
     "splash": {
-      "image": "./src/assets/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#FBF8F4"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "app.catsnap.client",
-      "config": { "usesNonExemptEncryption": false },
+      "config": {
+        "usesNonExemptEncryption": false
+      },
       "infoPlist": {
         "NSCameraUsageDescription": "CatSnap uses your camera to spot cats and score the photos you take of them.",
         "NSLocationWhenInUseUsageDescription": "CatSnap uses your location to show cat sightings nearby and to recognise the same cat on a later encounter.",
@@ -25,10 +27,6 @@
     },
     "android": {
       "package": "app.catsnap.client",
-      "adaptiveIcon": {
-        "foregroundImage": "./src/assets/adaptive-icon.png",
-        "backgroundColor": "#FBF8F4"
-      },
       "permissions": [
         "CAMERA",
         "ACCESS_FINE_LOCATION",
@@ -36,7 +34,12 @@
         "VIBRATE"
       ],
       "config": {
-        "googleMaps": { "apiKey": "REPLACE_WITH_ANDROID_MAPS_KEY" }
+        "googleMaps": {
+          "apiKey": "REPLACE_WITH_ANDROID_MAPS_KEY"
+        }
+      },
+      "adaptiveIcon": {
+        "backgroundColor": "#FBF8F4"
       }
     },
     "plugins": [
@@ -58,6 +61,7 @@
     ],
     "extra": {
       "apiBaseUrl": "http://localhost:4000"
-    }
+    },
+    "newArchEnabled": true
   }
 }

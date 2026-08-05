@@ -1,11 +1,5 @@
 import React, { useCallback, useEffect } from 'react';
-import {
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-  type LayoutChangeEvent,
-} from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -13,10 +7,10 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BlurView } from 'expo-blur';
 import {
-  Cards,
-  MapTrifold,
+  Camera,
+  Fire,
+  MapPin,
   Trophy,
   UserCircle,
   type IconProps,
@@ -24,16 +18,16 @@ import {
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 
 import {
-  bone,
+  accentGlow,
+  chrome,
   elevation,
-  fern,
-  glass,
   hitSlopFor,
-  icon,
-  innerHighlight,
   layout,
+  marmalade,
+  paper,
   press,
   radii,
+  spacing,
   spring,
   text,
   timing,
@@ -41,18 +35,34 @@ import {
 } from '../theme';
 
 const TAB_ICONS: Record<string, React.ComponentType<IconProps>> = {
-  MapTab: MapTrifold,
-  AlbumTab: Cards,
+  HomeTab: Fire,
+  MapTab: MapPin,
   ChallengesTab: Trophy,
   ProfileTab: UserCircle,
 };
 
+/**
+ * The bar carries no visible labels — four glyphs plus the shutter leaves roughly 45pt
+ * per slot, and a legible label does not fit in it. The names survive as accessibility
+ * labels, which is where a screen reader looks for them anyway.
+ */
 const TAB_LABELS: Record<string, string> = {
+  HomeTab: 'Viral',
   MapTab: 'Map',
-  AlbumTab: 'Album',
-  ChallengesTab: 'Challenges',
-  ProfileTab: 'Profile',
+  ChallengesTab: 'Contests',
+  ProfileTab: 'You',
 };
+
+/**
+ * The album keeps its stack and all its routes — it is where Photo Detail and Cat Dex
+ * live, and deep links land in it — but it has no slot in the bar. The shutter takes the
+ * centre position instead, and the album is reached from the Profile screen.
+ *
+ * Filtering here rather than removing the screen from the navigator is deliberate: the
+ * route has to stay mounted and navigable for `navigate('AlbumTab', …)` to work from
+ * Profile and for a deep link to resolve.
+ */
+const HIDDEN_TABS = new Set(['AlbumTab']);
 
 /**
  * Screens that commit to the Arena context hide all chrome.
@@ -62,21 +72,33 @@ const TAB_LABELS: Record<string, string> = {
  */
 const IMMERSIVE_ROUTES = new Set(['Capture', 'ScoreResult']);
 
-const BAR_HEIGHT = 62;
+const BAR_HEIGHT = 52;
+const FAB_SIZE = 56;
+/** How far the shutter rises above the pill's top edge. */
+const FAB_RISE = 24;
+/**
+ * The gap the four tabs leave in the middle of the row. Wider than the shutter itself, so
+ * a glyph never sits under the disc and the two inner tabs are not crowded by it.
+ */
+const FAB_SLOT = 76;
+const ICON_SIZE = 21;
 
 /**
- * The Fluid Island tab bar.
+ * The floating tab bar.
  *
- * Nav bars glued edge-to-edge against a screen edge are a banned layout. This is the
- * native translation of the floating-glass-pill pattern: detached from the bottom edge,
- * inset from both sides, lifted clear of the safe area, real glass rather than a flat
- * translucent fill.
+ * Nav bars glued edge-to-edge against a screen edge are a banned layout: this is a
+ * detached dark pill, inset from both sides and lifted clear of the safe area, with the
+ * capture shutter breaking out of its top edge in the centre.
  *
- * The active indicator is a single pill that SLIDES between slots on a soft spring — it
- * does not fade out and in per tab. Entering an immersive route slides the whole bar
- * off-screen downward.
+ * The shutter is deliberately *not* a fifth tab. Taking a photo is the only thing in this
+ * product that leaves the tab tree entirely, and it is the thing the whole app exists to
+ * do — so it gets the centre position, its own shape, its own colour and its own plane,
+ * rising clear of the pill rather than sitting flush in the row.
  *
- * `BlurView` is safe here because the bar is absolutely positioned and never scrolls.
+ * Four tabs fit around it because the album gave up its slot. Its stack is still mounted
+ * and still navigable; it is reached from Profile now (see `HIDDEN_TABS`).
+ *
+ * Entering an immersive route slides the whole assembly off-screen downward.
  */
 export function FloatingTabBar({
   state,
@@ -84,23 +106,12 @@ export function FloatingTabBar({
   navigation,
 }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
-  const reduceMotion = useReduceMotion();
 
-  const routeCount = state.routes.length;
-  const indicator = useSharedValue(state.index);
   const offscreen = useSharedValue(0);
-  /** Measured once on layout so the indicator can slide via translateX, never `left`. */
-  const slotWidth = useSharedValue(0);
 
   const focusedRoute = state.routes[state.index];
   const nestedRoute = focusedRoute.state?.routes?.[focusedRoute.state.index ?? 0];
   const immersive = nestedRoute ? IMMERSIVE_ROUTES.has(nestedRoute.name) : false;
-
-  useEffect(() => {
-    indicator.value = reduceMotion
-      ? state.index
-      : withSpring(state.index, spring.soft);
-  }, [indicator, reduceMotion, state.index]);
 
   useEffect(() => {
     offscreen.value = withTiming(
@@ -109,90 +120,108 @@ export function FloatingTabBar({
     );
   }, [immersive, offscreen]);
 
-  const barStyle = useAnimatedStyle(() => ({
+  const travel = BAR_HEIGHT + FAB_SIZE + insets.bottom + 40;
+
+  const assemblyStyle = useAnimatedStyle(() => ({
     opacity: 1 - offscreen.value,
-    transform: [{ translateY: offscreen.value * (BAR_HEIGHT + insets.bottom + 32) }],
+    transform: [{ translateY: offscreen.value * travel }],
   }));
 
-  /**
-   * Slides on `translateX` only. Animating `left` would trigger layout on every frame,
-   * which is exactly what the motion spec forbids.
-   */
-  const indicatorStyle = useAnimatedStyle(() => ({
-    width: slotWidth.value,
-    transform: [{ translateX: indicator.value * slotWidth.value }],
-    opacity: slotWidth.value > 0 ? 1 : 0,
-  }));
+  const openCamera = useCallback(() => {
+    navigation.navigate('MapTab', { screen: 'Capture' });
+  }, [navigation]);
 
-  const onBarLayout = useCallback(
-    (event: LayoutChangeEvent) => {
-      slotWidth.value = event.nativeEvent.layout.width / routeCount;
-    },
-    [routeCount, slotWidth]
-  );
+  const visible = state.routes.filter((route) => !HIDDEN_TABS.has(route.name));
+  const half = Math.ceil(visible.length / 2);
+
+  const renderTab = (route: (typeof visible)[number]) => {
+    const index = state.routes.indexOf(route);
+    const { options } = descriptors[route.key];
+    const focused = state.index === index;
+
+    return (
+      <TabItem
+        key={route.key}
+        routeName={route.name}
+        focused={focused}
+        badgeCount={options.tabBarBadge as number | undefined}
+        onPress={() => {
+          const event = navigation.emit({
+            type: 'tabPress',
+            target: route.key,
+            canPreventDefault: true,
+          });
+          if (!focused && !event.defaultPrevented) {
+            navigation.navigate(route.name);
+          }
+        }}
+      />
+    );
+  };
 
   return (
     <Animated.View
-      pointerEvents={immersive ? 'none' : 'auto'}
+      pointerEvents={immersive ? 'none' : 'box-none'}
       style={[
-        styles.wrap,
+        styles.assembly,
         {
           bottom: insets.bottom + layout.tabBarLift,
           left: layout.tabBarInset,
           right: layout.tabBarInset,
         },
-        elevation('floating', 'bone'),
-        barStyle,
+        assemblyStyle,
       ]}
     >
-      <BlurView
-        intensity={glass.intensity}
-        tint={glass.tintLight}
-        style={styles.glass}
-        onLayout={onBarLayout}
-      >
-        {/* 1px inner hairline + inset top highlight: real edge refraction, not just blur. */}
-        <View
-          style={[styles.hairline, innerHighlight(bone.innerHighlight)]}
-          pointerEvents="none"
-        />
+      <View style={[styles.bar, elevation('floating', 'paper')]}>
+        {visible.slice(0, half).map(renderTab)}
+        {/* Holds the centre open. The shutter is absolutely positioned so it can break
+            the pill's top edge, which means it cannot reserve its own width in the row. */}
+        <View style={styles.fabSlot} />
+        {visible.slice(half).map(renderTab)}
+      </View>
 
-        <Animated.View
-          style={[styles.indicator, indicatorStyle]}
-          pointerEvents="none"
-        >
-          <View style={styles.indicatorPill} />
-        </Animated.View>
-
-        <View style={styles.row}>
-          {state.routes.map((route, index) => {
-            const { options } = descriptors[route.key];
-            const focused = state.index === index;
-
-            return (
-              <TabItem
-                key={route.key}
-                routeName={route.name}
-                focused={focused}
-                badgeCount={options.tabBarBadge as number | undefined}
-                onPress={() => {
-                  const event = navigation.emit({
-                    type: 'tabPress',
-                    target: route.key,
-                    canPreventDefault: true,
-                  });
-                  if (!focused && !event.defaultPrevented) {
-                    navigation.navigate(route.name);
-                  }
-                }}
-              />
-            );
-          })}
-        </View>
-      </BlurView>
+      <Shutter onPress={openCamera} />
     </Animated.View>
   );
 }
+
+/**
+ * The capture shutter.
+ *
+ * Coral fill, white ring, and a shadow tinted to its own hue. The ring is what reads as
+ * the disc punching through the pill rather than resting on it, and the tinted shadow is
+ * what stops a saturated button from looking like a flat sticker pasted on the screen.
+ */
+const Shutter = React.memo(function Shutter({ onPress }: { onPress: () => void }) {
+  const reduceMotion = useReduceMotion();
+  const pressed = useSharedValue(0);
+
+  const animated = useAnimatedStyle(() => ({
+    transform: [
+      { scale: 1 - (1 - press.scale) * pressed.value },
+      { translateY: press.translateY * pressed.value },
+    ],
+  }));
+
+  return (
+    <Pressable
+      onPress={onPress}
+      onPressIn={() => {
+        pressed.value = reduceMotion ? 0 : withSpring(1, press.config);
+      }}
+      onPressOut={() => {
+        pressed.value = withSpring(0, press.config);
+      }}
+      accessibilityRole="button"
+      accessibilityLabel="Photograph a cat"
+      style={styles.shutterHit}
+    >
+      <Animated.View style={[styles.shutter, accentGlow('fab'), animated]}>
+        <Camera size={24} weight="fill" color={chrome.text} />
+      </Animated.View>
+    </Pressable>
+  );
+});
 
 interface TabItemProps {
   routeName: string;
@@ -204,9 +233,9 @@ interface TabItemProps {
 /**
  * A single slot.
  *
- * Active: Phosphor `fill` weight, accent color, label visible.
- * Inactive: Phosphor `light` weight, faint color, label hidden.
- * Every tap gets the same tactile compression as any other pressable in the product.
+ * Active: Phosphor `fill` weight in the accent. Inactive: `regular` weight in the muted
+ * chrome grey. Weight and colour change together, so the active tab is legible in
+ * greyscale as well as in colour.
  */
 const TabItem = React.memo(function TabItem({
   routeName,
@@ -216,113 +245,100 @@ const TabItem = React.memo(function TabItem({
 }: TabItemProps) {
   const reduceMotion = useReduceMotion();
   const pressed = useSharedValue(0);
-  const label = useSharedValue(focused ? 1 : 0);
+  const active = useSharedValue(focused ? 1 : 0);
 
-  const Glyph = TAB_ICONS[routeName] ?? MapTrifold;
+  const Glyph = TAB_ICONS[routeName] ?? MapPin;
   const labelText = TAB_LABELS[routeName] ?? routeName;
 
   useEffect(() => {
-    label.value = reduceMotion
+    active.value = reduceMotion
       ? focused
         ? 1
         : 0
       : withSpring(focused ? 1 : 0, spring.snap);
-  }, [focused, label, reduceMotion]);
-
-  const onPressIn = useCallback(() => {
-    pressed.value = reduceMotion ? 0 : withSpring(1, press.config);
-  }, [pressed, reduceMotion]);
-
-  const onPressOut = useCallback(() => {
-    pressed.value = withSpring(0, press.config);
-  }, [pressed]);
+  }, [active, focused, reduceMotion]);
 
   const contentStyle = useAnimatedStyle(() => ({
     transform: [
-      { scale: 1 - (1 - press.scale) * pressed.value },
+      { scale: (1 + active.value * 0.08) * (1 - (1 - press.scale) * pressed.value) },
       { translateY: press.translateY * pressed.value },
     ],
-  }));
-
-  const labelStyle = useAnimatedStyle(() => ({
-    opacity: label.value,
-    transform: [{ translateY: (1 - label.value) * 4 }],
   }));
 
   return (
     <Pressable
       onPress={onPress}
-      onPressIn={onPressIn}
-      onPressOut={onPressOut}
+      onPressIn={() => {
+        pressed.value = reduceMotion ? 0 : withSpring(1, press.config);
+      }}
+      onPressOut={() => {
+        pressed.value = withSpring(0, press.config);
+      }}
       hitSlop={hitSlopFor(BAR_HEIGHT)}
       accessibilityRole="tab"
       accessibilityLabel={labelText}
       accessibilityState={{ selected: focused }}
       style={styles.item}
     >
-      <Animated.View style={[styles.itemContent, contentStyle]}>
-        <View>
-          <Glyph
-            size={icon.size.lg}
-            color={focused ? fern[600] : bone.textFaint}
-            weight={focused ? icon.weightActive : icon.weightDefault}
-          />
-          {badgeCount ? (
-            <View style={styles.badge}>
-              <Text style={[text.stat, styles.badgeText]}>
-                {badgeCount > 9 ? '9+' : String(badgeCount)}
-              </Text>
-            </View>
-          ) : null}
-        </View>
-
-        <Animated.Text
-          numberOfLines={1}
-          style={[text.caption, styles.label, { color: fern[600] }, labelStyle]}
-        >
-          {labelText}
-        </Animated.Text>
+      <Animated.View style={contentStyle}>
+        <Glyph
+          size={ICON_SIZE}
+          color={focused ? marmalade[600] : chrome.textMuted}
+          weight={focused ? 'fill' : 'regular'}
+        />
+        {badgeCount ? (
+          <View style={styles.badge}>
+            <Text style={[text.statSm, styles.badgeText]}>
+              {badgeCount > 9 ? '9+' : String(badgeCount)}
+            </Text>
+          </View>
+        ) : null}
       </Animated.View>
     </Pressable>
   );
 });
 
 const styles = StyleSheet.create({
-  wrap: {
+  assembly: {
     position: 'absolute',
-    height: BAR_HEIGHT,
-    borderRadius: radii.full,
-    overflow: 'hidden',
+    alignItems: 'center',
+    // Room above the pill for the part of the shutter that sticks out.
+    paddingTop: FAB_RISE,
   },
-  glass: {
-    flex: 1,
-    borderRadius: radii.full,
-    overflow: 'hidden',
-    justifyContent: 'center',
-  },
-  hairline: {
-    ...StyleSheet.absoluteFillObject,
-    borderRadius: radii.full,
-    borderWidth: 1,
-    borderColor: bone.hairline,
-  },
-  indicator: {
+  /**
+   * Centred by half-width offset rather than by `alignSelf`. The assembly's width comes
+   * from `left`/`right` insets and is not known until layout, and `alignSelf` on an
+   * absolutely-positioned child is not reliable across platforms — this is exact.
+   */
+  shutterHit: {
     position: 'absolute',
     top: 0,
-    bottom: 0,
-    left: 0,
+    left: '50%',
+    marginLeft: -FAB_SIZE / 2,
+  },
+  shutter: {
+    width: FAB_SIZE,
+    height: FAB_SIZE,
+    borderRadius: radii.full,
+    backgroundColor: marmalade[600],
+    // The ring is what makes the disc read as punching through the pill. Against the page
+    // it is a highlight; against the black bar it is a cut-out.
+    borderWidth: 4,
+    borderColor: paper.bg,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  indicatorPill: {
-    width: 46,
-    height: 40,
+  bar: {
+    alignSelf: 'stretch',
+    height: BAR_HEIGHT,
     borderRadius: radii.full,
-    backgroundColor: fern[100],
-  },
-  row: {
+    backgroundColor: chrome.fill,
     flexDirection: 'row',
     alignItems: 'center',
+    paddingHorizontal: spacing.sm,
+  },
+  fabSlot: {
+    width: FAB_SLOT,
   },
   item: {
     flex: 1,
@@ -330,30 +346,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  itemContent: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 1,
-  },
-  label: {
-    fontSize: 9,
-    lineHeight: 11,
-  },
   badge: {
     position: 'absolute',
-    top: -3,
-    right: -6,
+    top: -5,
+    right: -8,
     minWidth: 15,
     height: 15,
     paddingHorizontal: 3,
-    /** Square-ish, not a pill. Pill "New"/"Beta" badges are a flagged cliche. */
     borderRadius: radii.xs,
-    backgroundColor: fern[600],
+    backgroundColor: marmalade[600],
     alignItems: 'center',
     justifyContent: 'center',
   },
   badgeText: {
-    color: '#FFFFFF',
+    color: chrome.text,
     fontSize: 9,
     lineHeight: 11,
   },

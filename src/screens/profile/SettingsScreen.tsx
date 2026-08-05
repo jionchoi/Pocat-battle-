@@ -11,7 +11,7 @@ import { Screen, ScreenHeader, SectionHeader } from '../../components/Screen';
 import { showToast } from '../../components/Toast';
 import { authApi } from '../../api/endpoints';
 import type { ProfileStackParamList } from '../../navigation/types';
-import { bone, fern, measure, spacing, text } from '../../theme';
+import { paper, marmalade, measure, spacing, text } from '../../theme';
 import { clearLocalData } from '../../services/database';
 import { useAuthStore } from '../../store/authStore';
 import { useAlbumStore } from '../../store/albumStore';
@@ -112,7 +112,7 @@ export function SettingsScreen({ navigation }: Props) {
       <Card>
         <View style={styles.switchRow}>
           <View style={styles.switchBody}>
-            <Text style={[text.body, { color: bone.text }]}>Push notifications</Text>
+            <Text style={[text.body, { color: paper.text }]}>Push notifications</Text>
             <Text style={[text.caption, styles.hint]}>
               Challenge results, reactions to your photos, and rare cats spotted nearby.
             </Text>
@@ -121,8 +121,8 @@ export function SettingsScreen({ navigation }: Props) {
             value={pushEnabled}
             onValueChange={(next) => void togglePush(next)}
             disabled={pushBusy}
-            trackColor={{ true: fern[500], false: bone.hairlineHi }}
-            thumbColor={Platform.OS === 'android' ? fern[700] : undefined}
+            trackColor={{ true: marmalade[500], false: paper.hairlineHi }}
+            thumbColor={Platform.OS === 'android' ? marmalade[700] : undefined}
             accessibilityLabel="Push notifications"
           />
         </View>
@@ -241,7 +241,7 @@ const Row = React.memo(function Row({
       style={styles.row}
     >
       <View style={styles.rowBody}>
-        <Text style={[text.body, { color: bone.text }]}>{label}</Text>
+        <Text style={[text.body, { color: paper.text }]}>{label}</Text>
         {detail ? (
           <Text style={[text.caption, styles.hint]} numberOfLines={2}>
             {detail}
@@ -264,7 +264,7 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   hint: {
-    color: bone.textMuted,
+    color: paper.textMuted,
     maxWidth: measure,
   },
   row: {
@@ -283,7 +283,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   legal: {
-    color: bone.textFaint,
+    color: paper.textFaint,
     maxWidth: measure,
   },
 });

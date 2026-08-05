@@ -5,21 +5,25 @@ import { bezelPad } from './spacing';
  *
  * Radius varies by depth — tighter on inner elements, softer on containers. A single
  * uniform radius across every surface is a flagged weakness.
+ *
+ * The scale is tighter than it was: photographs now bleed to the card edge with no
+ * bezel between them, and a 28px radius on a 148px poster eats a visible bite out of the
+ * cat. Containers hold their curve; anything wrapping an image sits at 16–20.
  */
 export const radii = {
-  /** Chips, ticks. */
+  /** Icon wells, small glyph squares. */
   xs: 8,
-  /** Badges, mono value pills. Rarity/rank badges are square-ish, not pills. */
+  /** Badges, tier chips, mono value pills. */
   sm: 10,
   /** Secondary buttons, inputs. */
   md: 14,
-  /** Inner core of a small bezel. */
-  lg: 20,
-  /** Outer shell of a card. */
-  xl: 28,
-  /** Modals, catch result card. */
-  xxl: 36,
-  /** Primary CTAs, floating tab bar, avatars. */
+  /** Collection tiles, showcase cells, wall cards. */
+  lg: 18,
+  /** Poster cards on the trending rail. */
+  xl: 20,
+  /** The sheet that overlaps a full-bleed hero; bottom sheets; modals. */
+  xxl: 26,
+  /** Primary CTAs, floating tab bar, avatars, the capture FAB. */
   full: 999,
 } as const;
 
@@ -30,8 +34,8 @@ export const radii = {
  * curves visibly disagree along the corner. This is the only correct way to derive an
  * inner radius — never hardcode it.
  *
- *   concentric(radii.xl)      -> 22   (28 - 6)
- *   concentric(radii.xxl, 8)  -> 28   (36 - 8)
+ *   concentric(radii.xl)      -> 14   (20 - 6)
+ *   concentric(radii.xxl, 8)  -> 18   (26 - 8)
  */
 export function concentric(outer: number, pad: number = bezelPad): number {
   if (outer >= radii.full) return radii.full;
@@ -39,11 +43,12 @@ export function concentric(outer: number, pad: number = bezelPad): number {
 }
 
 /**
- * Avatars are squircles rather than perfect circles — circle-only avatars read as
- * generic. `circle` stays available for author chips sitting on a photo, where a round
- * crop is genuinely the right call.
+ * Avatars are circles here rather than squircles. Every avatar in this product sits
+ * either on a photograph or beside one, and a squircle reads as a photo thumbnail at
+ * small sizes — the round crop is what distinguishes "a person" from "a picture".
+ * `squircle` stays available for the shop's frame previews.
  */
 export const avatarRadius = {
-  squircle: radii.xl,
+  squircle: radii.lg,
   circle: radii.full,
 } as const;

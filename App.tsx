@@ -6,15 +6,27 @@ import { NavigationContainer } from '@react-navigation/native';
 import * as SplashScreenModule from 'expo-splash-screen';
 import { useFonts } from 'expo-font';
 import {
-  JetBrainsMono_500Medium,
-  JetBrainsMono_600SemiBold,
-} from '@expo-google-fonts/jetbrains-mono';
+  SpaceMono_400Regular,
+  SpaceMono_700Bold,
+} from '@expo-google-fonts/space-mono';
+import {
+  Manrope_400Regular,
+  Manrope_500Medium,
+  Manrope_600SemiBold,
+  Manrope_700Bold,
+  Manrope_800ExtraBold,
+} from '@expo-google-fonts/manrope';
+import {
+  PlusJakartaSans_700Bold,
+  PlusJakartaSans_800ExtraBold,
+} from '@expo-google-fonts/plus-jakarta-sans';
 
 import { ToastHost } from './src/components/Toast';
 import { linking } from './src/navigation/linking';
 import { RootNavigator } from './src/navigation/RootNavigator';
-import { bone } from './src/theme';
+import { paper } from './src/theme';
 import { useAuthStore } from './src/store/authStore';
+import { useReactionStore } from './src/store/reactionStore';
 
 /**
  * App root.
@@ -22,9 +34,9 @@ import { useAuthStore } from './src/store/authStore';
  * The splash screen is held until fonts are ready. A flash of system font on launch undoes
  * the entire type system, and it is very visible on a cold start.
  *
- * Satoshi is not on Google Fonts — download the four weights from fontshare.com/fonts/satoshi
- * into src/assets/fonts/ (see typography.ts `requiredFontFiles`). Until they exist, the
- * Satoshi entries below must stay commented out or Metro fails to resolve them.
+ * All three families ship as npm packages, so there is no manual download step and no
+ * commented-out `require()` waiting to be uncommented. That arrangement is how the app
+ * previously ran its entire life in system San Francisco without anyone noticing.
  */
 
 void SplashScreenModule.preventAutoHideAsync().catch(() => undefined);
@@ -34,13 +46,18 @@ export default function App() {
   const [ready, setReady] = useState(false);
 
   const [fontsLoaded, fontError] = useFonts({
-    JetBrainsMono_500Medium,
-    JetBrainsMono_600SemiBold,
-    // Uncomment once the Fontshare files are in src/assets/fonts/:
-    // 'Satoshi-Medium': require('./src/assets/fonts/Satoshi-Medium.otf'),
-    // 'Satoshi-SemiBold': require('./src/assets/fonts/Satoshi-SemiBold.otf'),
-    // 'Satoshi-Bold': require('./src/assets/fonts/Satoshi-Bold.otf'),
-    // 'Satoshi-Black': require('./src/assets/fonts/Satoshi-Black.otf'),
+    // Display voice — headings and every numeral.
+    PlusJakartaSans_700Bold,
+    PlusJakartaSans_800ExtraBold,
+    // UI voice.
+    Manrope_400Regular,
+    Manrope_500Medium,
+    Manrope_600SemiBold,
+    Manrope_700Bold,
+    Manrope_800ExtraBold,
+    // Mode labels and photo annotations.
+    SpaceMono_400Regular,
+    SpaceMono_700Bold,
   });
 
   useEffect(() => {
@@ -50,7 +67,12 @@ export default function App() {
   }, [fontError, fontsLoaded]);
 
   useEffect(() => {
-    if (ready) void hydrate();
+    if (!ready) return;
+    void hydrate();
+    // The feed is served from a shared cache with no viewer in it, so this device's own
+    // reactions come from disk. Loaded alongside the session rather than by the feed
+    // screen, so the reaction buttons are never briefly wrong on first paint.
+    void useReactionStore.getState().hydrate();
   }, [hydrate, ready]);
 
   const onNavigationReady = useCallback(() => {
@@ -77,6 +99,6 @@ export default function App() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: bone.bg,
+    backgroundColor: paper.bg,
   },
 });

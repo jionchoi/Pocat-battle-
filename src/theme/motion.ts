@@ -33,7 +33,7 @@ export const timing = {
     duration: 240,
     easing: Easing.bezier(0.4, 0, 1, 1),
   } satisfies WithTimingConfig,
-  /** Context cross-fade between Bone and Arena. Never a hard cut. */
+  /** Context cross-fade between Paper and Arena. Never a hard cut. */
   contextSwitch: {
     duration: 600,
     easing: Easing.bezier(0.32, 0.72, 0, 1),

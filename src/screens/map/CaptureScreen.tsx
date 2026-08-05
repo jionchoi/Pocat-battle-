@@ -18,7 +18,7 @@ import { preparePhotoForUpload } from '../../services/catDetection';
 import { useAlbumStore } from '../../store/albumStore';
 import { useAuthStore } from '../../store/authStore';
 import { useCaptureStore } from '../../store/captureStore';
-import { arena, spacing, text } from '../../theme';
+import { arena, radii, spacing, text } from '../../theme';
 import type { MapStackParamList } from '../../navigation/types';
 
 /**
@@ -71,6 +71,11 @@ export function CaptureScreen() {
       const shot = await camera.current.takePictureAsync({
         quality: 0.25,
         skipProcessing: true,
+        // These are analysis frames, not photographs. The detection loop grabs one every
+        // 220ms, and each `takePictureAsync` plays the system shutter by default — which
+        // is a camera audibly firing over and over at someone trying to photograph a cat.
+        // The player never sees these frames and they are never saved.
+        shutterSound: false,
       });
       return shot?.uri ?? null;
     } catch {
@@ -314,9 +319,15 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: arena.bg,
   },
+  /**
+   * A hair of darkness over the preview. Not decoration: every piece of chrome on this
+   * screen is white or coral sitting directly on an uncontrolled image, and a bright
+   * scene washes all of it out. Three percent is enough to hold the contrast and far
+   * below the point where the viewfinder stops matching the shot.
+   */
   grain: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#0A0806',
+    backgroundColor: '#000000',
     opacity: 0.03,
   },
   gate: {
@@ -343,8 +354,8 @@ const styles = StyleSheet.create({
     padding: spacing.md,
   },
   rejectionCard: {
-    backgroundColor: '#1D1A16',
-    borderRadius: 36,
+    backgroundColor: '#161618',
+    borderRadius: radii.xxl,
     padding: spacing.lg,
     gap: spacing.sm,
     marginBottom: spacing.xxxl,

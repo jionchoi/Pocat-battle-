@@ -12,9 +12,9 @@ import Animated, {
 import { PawPrint } from 'phosphor-react-native';
 
 import {
-  bone,
+  paper,
   elevation,
-  fern,
+  marmalade,
   hitSlopFor,
   icon,
   layout,
@@ -87,16 +87,16 @@ export const SightingPin = React.memo(function SightingPin({
         style={[
           styles.pin,
           {
-            backgroundColor: verified ? fern[600] : bone.surface,
-            borderColor: verified ? fern[700] : fern[600],
+            backgroundColor: verified ? marmalade[600] : paper.surface,
+            borderColor: verified ? marmalade[700] : marmalade[600],
           },
-          elevation('raised', 'bone'),
+          elevation('raised', 'paper'),
           style,
         ]}
       >
         <PawPrint
           size={16}
-          color={verified ? '#FFFFFF' : fern[600]}
+          color={verified ? '#FFFFFF' : marmalade[600]}
           weight={isMine ? icon.weightActive : icon.weightDefault}
         />
       </Animated.View>
@@ -176,13 +176,13 @@ const styles = StyleSheet.create({
     width: 14,
     height: 14,
     borderRadius: radii.full,
-    backgroundColor: fern[500],
+    backgroundColor: marmalade[500],
   },
   selfCore: {
     width: 13,
     height: 13,
     borderRadius: radii.full,
-    backgroundColor: fern[600],
+    backgroundColor: marmalade[600],
     borderWidth: 2.5,
     borderColor: '#FFFFFF',
   },

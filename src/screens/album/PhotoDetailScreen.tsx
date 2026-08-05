@@ -1,25 +1,54 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Share, StyleSheet, Switch, Text, View } from 'react-native';
+import {
+  Pressable,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
 import { Image } from 'expo-image';
-import { ImageBroken } from 'phosphor-react-native';
+import {
+  CaretLeft,
+  CaretRight,
+  ImageBroken,
+  ShareNetwork,
+} from 'phosphor-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { photoApi } from '../../api/endpoints';
 import { Badge, RarityBadge } from '../../components/Badge';
 import { Button } from '../../components/Button';
 import { Card, DividedGroup } from '../../components/Card';
+import { CircleButton } from '../../components/CircleButton';
 import { ConfirmSheet } from '../../components/BottomSheet';
 import { EmptyState } from '../../components/EmptyState';
 import { ScoreBreakdown } from '../../components/ScoreBreakdown';
-import { Screen, ScreenHeader, SectionHeader } from '../../components/Screen';
+import { Screen, SectionHeader } from '../../components/Screen';
 import { SkeletonBlock } from '../../components/Skeleton';
 import { TextField } from '../../components/TextField';
 import { showToast } from '../../components/Toast';
-import type { Photo } from '../../models';
+import { VoteRow } from '../../components/VoteButton';
+import type { Photo, Reaction } from '../../models';
 import { useAlbumStore } from '../../store/albumStore';
+import { useAuthStore } from '../../store/authStore';
+import { usePhotoReaction } from '../../hooks/usePhotoReaction';
+import { useReactionStore } from '../../store/reactionStore';
 import { COMMUNITY_CONFIG, communityLabel } from '../../constants/game';
-import { bone, fern, radii, spacing, text } from '../../theme';
-import type { AlbumStackParamList } from '../../navigation/types';
+import {
+  chrome,
+  layout,
+  paper,
+  marmalade,
+  photoScrim,
+  radii,
+  spacing,
+  text,
+} from '../../theme';
 import { relativeTime } from '../../utils/format';
 
 /**
@@ -31,12 +60,43 @@ import { relativeTime } from '../../utils/format';
  * than buried in an icon row.
  */
 
-type Props = NativeStackScreenProps<AlbumStackParamList, 'PhotoDetail'>;
+/**
+ * Typed against the route it needs rather than against one stack's whole param list.
+ *
+ * This screen is mounted in both the album and the home stacks — a photo opened from the
+ * viral feed is the same screen as a photo opened from your album. Naming `AlbumStackParamList`
+ * here would make it un-mountable anywhere else, and every navigation call it made would
+ * be checked against routes that do not exist in the stack it is actually running in.
+ */
+/**
+ * How far the sheet rides up over the photo. Enough to read as an overlap and to hide the
+ * seam where the scrim ends; not so much that it eats the bottom of the crop.
+ */
+const SHEET_OVERLAP = 18;
+
+type PhotoDetailParams = {
+  PhotoDetail: { photoId: string };
+  /** Both stacks that mount this screen register a CatProfile of their own. */
+  CatProfile: { catId: string };
+};
+
+type Props = NativeStackScreenProps<PhotoDetailParams, 'PhotoDetail'>;
 
 export function PhotoDetailScreen({ route, navigation }: Props) {
   const { photoId } = route.params;
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+
+  /**
+   * A little over half the viewport. Enough that a portrait crop is genuinely large,
+   * while still leaving the score and the reaction bar visible without scrolling — the
+   * two things a reader opens this screen to do.
+   */
+  const heroHeight = Math.round(windowHeight * 0.54);
 
   const cached = useAlbumStore((s) => s.byId(photoId));
+  const myReactions = useReactionStore((s) => s.byPhotoId);
+  const viewerId = useAuthStore((s) => s.user?.id ?? null);
   const setCaption = useAlbumStore((s) => s.setCaption);
   const setShared = useAlbumStore((s) => s.setShared);
   const setShowcased = useAlbumStore((s) => s.setShowcased);
@@ -55,7 +115,12 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
     photoApi
       .detail(photoId)
       .then((result) => {
-        setPhoto(result.photo);
+        // The detail payload is cacheable and so carries no viewer — this device's own
+        // reaction comes from the store, same as it does on the feed. See reactionStore.
+        setPhoto({
+          ...result.photo,
+          myReaction: useReactionStore.getState().get(result.photo.id),
+        });
         setCaptionText(result.photo.caption ?? '');
       })
       .catch(() => {
@@ -119,6 +184,27 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
     }
   }, [navigation, photo, remove]);
 
+  /**
+   * Reacting from the detail screen. The rules live in `usePhotoReaction`, shared with
+   * the feed — a second hand-rolled optimistic update is a second place for the counts
+   * to drift.
+   */
+  const patchPhoto = useCallback(
+    (photoId: string, apply: (p: Photo) => Photo) => {
+      setPhoto((current) => (current && current.id === photoId ? apply(current) : current));
+    },
+    []
+  );
+
+  const reactTo = usePhotoReaction(patchPhoto);
+
+  const react = useCallback(
+    (reaction: Reaction) => {
+      if (photo) reactTo(photo, reaction);
+    },
+    [photo, reactTo]
+  );
+
   const share = useCallback(async () => {
     if (!photo) return;
 
@@ -135,13 +221,12 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
   if (missing) {
     return (
       <Screen>
-        <ScreenHeader title="Photo not found" />
         <EmptyState
           title="This photo has moved on"
           body="It may have been deleted from another device. Your other photos are unaffected."
           Glyph={ImageBroken}
-          actionLabel="Back to your album"
-          onAction={() => navigation.navigate('PhotoAlbumGrid')}
+          actionLabel="Go back"
+          onAction={() => navigation.goBack()}
         />
       </Screen>
     );
@@ -157,144 +242,233 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
     );
   }
 
+  const isMine = viewerId !== null && photo.ownerId === viewerId;
+
   return (
-    <Screen scroll>
-      <View style={styles.hero}>
-        <Image
-          source={photo.imageUrl || undefined}
-          contentFit="cover"
-          transition={220}
-          style={StyleSheet.absoluteFill}
-          accessible
-          accessibilityLabel={`Photo of ${photo.catNickname}`}
-        />
-        {!photo.imageUrl ? (
-          <View style={styles.noPhoto}>
-            <Text style={[text.caption, { color: bone.textFaint }]}>No image</Text>
-          </View>
-        ) : null}
-      </View>
+    <View style={styles.root}>
+      {/* The hero runs under the notch, so the clock has to invert to stay readable. */}
+      <StatusBar style="light" />
 
-      <ScreenHeader
-        title={photo.catNickname}
-        subtitle={`Captured ${relativeTime(photo.capturedAt)}`}
-      />
-
-      <View style={styles.badges}>
-        <RarityBadge rarity={photo.tier} />
-        {photo.submittedToChallengeId ? (
-          <Badge label="Challenge entry" tone="accent" />
-        ) : null}
-        {photo.showcased ? <Badge label="Showcased" tone="neutral" /> : null}
-      </View>
-
-      <SectionHeader
-        title="What the app thought"
-        description="Scored the moment you took it, from composition, pose and how unusual the cat is."
-      />
-
-      <Card padding={spacing.lg}>
-        <ScoreBreakdown
-          scores={photo.scores}
-          pose={photo.pose}
-          tier={photo.tier}
-          badges={photo.badges}
-        />
-      </Card>
-
-      {/*
-        The second scoring layer. Deliberately a separate block from the breakdown above,
-        because the two are different opinions and the gap between them is the point — a
-        photo the app rated modestly that people loved is the interesting outcome.
-      */}
-      <SectionHeader
-        title="What people thought"
-        description="Reactions from other players. This is what decides your rank."
-      />
-
-      <Card padding={spacing.lg}>
-        {!photo.sharedToFeed ? (
-          <Text style={[text.body, { color: bone.textMuted }]}>
-            This photo is private, so nobody has seen it. Share it to the feed and
-            reactions start counting toward your rank.
-          </Text>
-        ) : (
-          <>
-            <View style={styles.communityRow}>
-              <View>
-                <Text style={[text.caption, { color: bone.textMuted }]}>Reactions</Text>
-                <Text style={[text.statLg, { color: bone.text }]}>{photo.voteCount}</Text>
-              </View>
-              <View>
-                <Text style={[text.caption, { color: bone.textMuted }]}>Seen by</Text>
-                <Text style={[text.statLg, { color: bone.text }]}>{photo.viewCount}</Text>
-              </View>
-              <View>
-                <Text style={[text.caption, { color: bone.textMuted }]}>Reacted</Text>
-                <Text style={[text.statLg, { color: bone.text }]}>
-                  {communityLabel(photo.communityScore, photo.viewCount) ?? '—'}
-                </Text>
-              </View>
+      <ScrollView
+        contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + spacing.xxxl }]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        {/*
+          Full-bleed hero at a little over half the screen. Cropping the photo to a card
+          on the one screen dedicated to that photo is the wrong instinct — this is the
+          only place in the product where the image gets to be the size it deserves.
+        */}
+        <View style={[styles.hero, { height: heroHeight }]}>
+          <Image
+            source={photo.imageUrl || undefined}
+            contentFit="cover"
+            transition={220}
+            style={StyleSheet.absoluteFill}
+            accessible
+            accessibilityLabel={`Photo of ${photo.catNickname}`}
+          />
+          {!photo.imageUrl ? (
+            <View style={styles.noPhoto}>
+              <Text style={[text.caption, { color: paper.textFaint }]}>No image</Text>
             </View>
+          ) : null}
 
-            <Text style={[text.caption, styles.communityNote]}>
-              {communityLabel(photo.communityScore, photo.viewCount)
-                ? 'Ranked on the share of viewers who reacted, so a smaller audience is not a disadvantage.'
-                : `Not enough views yet for a meaningful figure — it settles after about ${COMMUNITY_CONFIG.minViewsForConfidence} people have seen it.`}
+          <View pointerEvents="none" style={styles.heroScrim} />
+
+          <View style={[styles.heroChrome, { top: insets.top + spacing.xs }]}>
+            <CircleButton
+              Glyph={CaretLeft}
+              onPress={() => navigation.goBack()}
+              accessibilityLabel="Go back"
+            />
+            <CircleButton
+              Glyph={ShareNetwork}
+              onPress={() => void share()}
+              accessibilityLabel="Share this shot"
+              glyphSize={17}
+            />
+          </View>
+
+          <View style={styles.heroFoot} pointerEvents="none">
+            <Text style={[text.h1, styles.heroTitle]} numberOfLines={1}>
+              {photo.catNickname}
             </Text>
-          </>
-        )}
-      </Card>
+            <RarityBadge rarity={photo.tier} size="lg" />
+          </View>
+        </View>
 
-      <SectionHeader title="Caption" />
-      <TextField
-        label="Caption"
-        value={caption}
-        onChangeText={setCaptionText}
-        placeholder="Say something about this one"
-        maxLength={140}
-        multiline
-        
-      />
-      {caption.trim() !== (photo.caption ?? '') ? (
-        <Button
-          label="Save caption"
-          variant="secondary"
-          onPress={() => void saveCaption()}
-          loading={savingCaption}
-          style={styles.saveCaption}
-        />
-      ) : null}
+        {/*
+          The sheet rides up over the photo's bottom edge. That overlap is what makes the
+          two read as one object rather than as a picture with a panel below it — and it
+          hides the seam where the scrim ends, which is otherwise a visible band.
+        */}
+        <View style={styles.sheet}>
+          <View style={styles.scoreRow}>
+            <Text style={[text.statLg, { color: paper.text }]}>{photo.scores.total}</Text>
+            <Text style={[text.caption, styles.scoreOutOf]}>/ 100 overall</Text>
+          </View>
 
-      <SectionHeader
-        title="Sharing"
-        description="Your album is private. Nothing here is visible to anyone until you share it."
-      />
+          <ScoreBreakdown
+            scores={photo.scores}
+            pose={photo.pose}
+            tier={photo.tier}
+            badges={photo.badges}
+            showTotal={false}
+            style={styles.breakdown}
+          />
 
-      <DividedGroup>
-        <ToggleRow
-          label="Show in the community feed"
-          hint="Other players can see and react to this photo."
-          value={photo.sharedToFeed}
-          onChange={() => void toggleShared()}
-        />
-        <ToggleRow
-          label="Pin to my public profile"
-          hint="Appears in your showcase, up to six photos."
-          value={photo.showcased}
-          onChange={() => void toggleShowcased()}
-        />
-      </DividedGroup>
+          {/*
+            The viewer's own reaction is read from the store rather than from `photo`,
+            because the store is where it actually lives — the detail payload is shared
+            and carries no viewer. Reading it from one place is what stops the button and
+            the feed disagreeing after a round trip.
+          */}
+          <VoteRow
+            reactions={photo.reactions}
+            myReaction={myReactions[photo.id] ?? null}
+            onReact={react}
+            disabled={isMine}
+            size="lg"
+            style={styles.votes}
+          />
 
-      <View style={styles.actions}>
-        <Button label="Share this shot" onPress={() => void share()} trailingIcon />
-        <Button
-          label="Delete photo"
-          variant="ghost"
-          destructive
-          onPress={() => setConfirmingDelete(true)}
-        />
-      </View>
+          {isMine ? (
+            <Text style={[text.caption, styles.ownNote]}>
+              Your own photo — reactions are other players' verdict, not yours.
+            </Text>
+          ) : null}
+
+          {(photo.submittedToChallengeId || photo.showcased) && (
+            <View style={styles.badges}>
+              {photo.submittedToChallengeId ? (
+                <Badge label="Challenge entry" tone="accent" />
+              ) : null}
+              {photo.showcased ? <Badge label="Showcased" tone="neutral" /> : null}
+            </View>
+          )}
+
+          <Pressable
+            onPress={() => navigation.navigate('CatProfile', { catId: photo.catId })}
+            accessibilityRole="button"
+            accessibilityLabel={`Open ${photo.catNickname}'s Dex entry`}
+            style={styles.dexRow}
+          >
+            <View style={styles.dexThumb}>
+              <Image
+                source={photo.imageUrl || undefined}
+                contentFit="cover"
+                transition={160}
+                style={StyleSheet.absoluteFill}
+                accessible={false}
+              />
+            </View>
+            <View style={styles.rowBody}>
+              <Text style={[text.h3, { color: paper.text }]} numberOfLines={1}>
+                {`${photo.catNickname}'s Dex`}
+              </Text>
+              <Text style={[text.caption, { color: paper.textFaint }]} numberOfLines={1}>
+                {`Captured ${relativeTime(photo.capturedAt)} · ${photo.tier}`}
+              </Text>
+            </View>
+            <CaretRight size={16} color={paper.textFaint} />
+          </Pressable>
+
+          {/*
+            The second scoring layer. Deliberately a separate block from the breakdown
+            above, because the two are different opinions and the gap between them is the
+            point — a photo the app rated modestly that people loved is the interesting
+            outcome.
+          */}
+          <SectionHeader
+            title="What people thought"
+            description="Reactions from other players. This is what decides your rank."
+          />
+
+          <Card padding={spacing.lg}>
+            {!photo.sharedToFeed ? (
+              <Text style={[text.body, { color: paper.textMuted }]}>
+                This photo is private, so nobody has seen it. Share it to the feed and
+                reactions start counting toward your rank.
+              </Text>
+            ) : (
+              <>
+                <View style={styles.communityRow}>
+                  <View>
+                    <Text style={[text.caption, { color: paper.textMuted }]}>Reactions</Text>
+                    <Text style={[text.statMd, { color: paper.text }]}>{photo.voteCount}</Text>
+                  </View>
+                  <View>
+                    <Text style={[text.caption, { color: paper.textMuted }]}>Seen by</Text>
+                    <Text style={[text.statMd, { color: paper.text }]}>{photo.viewCount}</Text>
+                  </View>
+                  <View>
+                    <Text style={[text.caption, { color: paper.textMuted }]}>Reacted</Text>
+                    <Text style={[text.statMd, { color: paper.text }]}>
+                      {communityLabel(photo.communityScore, photo.viewCount) ?? '—'}
+                    </Text>
+                  </View>
+                </View>
+
+                <Text style={[text.caption, styles.communityNote]}>
+                  {communityLabel(photo.communityScore, photo.viewCount)
+                    ? 'Ranked on the share of viewers who reacted, so a smaller audience is not a disadvantage.'
+                    : `Not enough views yet for a meaningful figure — it settles after about ${COMMUNITY_CONFIG.minViewsForConfidence} people have seen it.`}
+                </Text>
+              </>
+            )}
+          </Card>
+
+          <SectionHeader title="Caption" />
+          <TextField
+            label="Caption"
+            value={caption}
+            onChangeText={setCaptionText}
+            placeholder="Say something about this one"
+            maxLength={140}
+            multiline
+          />
+          {caption.trim() !== (photo.caption ?? '') ? (
+            <Button
+              label="Save caption"
+              variant="secondary"
+              onPress={() => void saveCaption()}
+              loading={savingCaption}
+              style={styles.saveCaption}
+            />
+          ) : null}
+
+          <SectionHeader
+            title="Sharing"
+            description="Your album is private. Nothing here is visible to anyone until you share it."
+          />
+
+          <DividedGroup>
+            <ToggleRow
+              label="Show in the community feed"
+              hint="Other players can see and react to this photo."
+              value={photo.sharedToFeed}
+              onChange={() => void toggleShared()}
+            />
+            <ToggleRow
+              label="Pin to my public profile"
+              hint="Appears in your showcase, up to six photos."
+              value={photo.showcased}
+              onChange={() => void toggleShowcased()}
+            />
+          </DividedGroup>
+
+          <View style={styles.actions}>
+            <Button label="Share this shot" onPress={() => void share()} trailingIcon />
+            <Button
+              label="Delete photo"
+              variant="ghost"
+              destructive
+              onPress={() => setConfirmingDelete(true)}
+            />
+          </View>
+        </View>
+      </ScrollView>
 
       <ConfirmSheet
         visible={confirmingDelete}
@@ -305,7 +479,7 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
         confirmLabel={deleting ? 'Deleting' : 'Delete'}
         destructive
       />
-    </Screen>
+    </View>
   );
 }
 
@@ -323,36 +497,116 @@ const ToggleRow = React.memo(function ToggleRow({
   return (
     <View style={styles.toggleRow}>
       <View style={styles.toggleText}>
-        <Text style={[text.body, { color: bone.text }]}>{label}</Text>
-        <Text style={[text.caption, { color: bone.textMuted }]}>{hint}</Text>
+        <Text style={[text.body, { color: paper.text }]}>{label}</Text>
+        <Text style={[text.caption, { color: paper.textMuted }]}>{hint}</Text>
       </View>
 
       <Switch
         value={value}
         onValueChange={onChange}
         accessibilityLabel={label}
-        trackColor={{ true: fern[500], false: bone.hairlineHi }}
-        thumbColor={bone.surface}
+        trackColor={{ true: marmalade[500], false: paper.hairlineHi }}
+        thumbColor={paper.surface}
       />
     </View>
   );
 });
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: paper.bg,
+  },
+  scroll: {
+    flexGrow: 1,
+  },
   gap: {
     marginTop: spacing.sm,
   },
   hero: {
     width: '100%',
-    aspectRatio: 1,
-    borderRadius: radii.xxl,
-    overflow: 'hidden',
-    backgroundColor: bone.sunken,
+    backgroundColor: chrome.fill,
+    justifyContent: 'flex-end',
+  },
+  heroScrim: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '50%',
+    backgroundColor: photoScrim.posterBottom,
+  },
+  heroChrome: {
+    position: 'absolute',
+    left: layout.gutter,
+    right: layout.gutter,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  heroFoot: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: layout.gutter,
+    // Clears the sheet's overlap, so the name is never half-covered by it.
+    paddingBottom: spacing.xl + SHEET_OVERLAP,
+  },
+  heroTitle: {
+    color: chrome.text,
+    flexShrink: 1,
+  },
+  sheet: {
+    flex: 1,
+    marginTop: -SHEET_OVERLAP,
+    paddingTop: spacing.lg,
+    paddingHorizontal: layout.gutter,
+    borderTopLeftRadius: radii.xxl,
+    borderTopRightRadius: radii.xxl,
+    backgroundColor: paper.bg,
+  },
+  scoreRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 6,
+  },
+  scoreOutOf: {
+    color: paper.textFaint,
+  },
+  breakdown: {
+    marginTop: spacing.sm,
+  },
+  votes: {
+    marginTop: spacing.md,
+  },
+  ownNote: {
+    marginTop: spacing.xs,
+    color: paper.textFaint,
   },
   noPhoto: {
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  dexRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+    padding: spacing.xs + 2,
+    borderRadius: radii.lg,
+    backgroundColor: paper.sunkenSoft,
+  },
+  dexThumb: {
+    width: 36,
+    height: 36,
+    borderRadius: radii.sm,
+    overflow: 'hidden',
+    backgroundColor: paper.sunken,
+  },
+  rowBody: {
+    flex: 1,
+    gap: 2,
   },
   badges: {
     flexDirection: 'row',
@@ -367,7 +621,7 @@ const styles = StyleSheet.create({
   },
   communityNote: {
     marginTop: spacing.md,
-    color: bone.textFaint,
+    color: paper.textFaint,
   },
   saveCaption: {
     marginTop: spacing.sm,

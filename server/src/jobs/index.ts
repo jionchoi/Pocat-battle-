@@ -5,6 +5,7 @@ import { logger } from '../logger';
 import { rotateChallenges } from '../services/challengeService';
 import { recomputeLeaderboards } from '../services/leaderboardService';
 import { expireLapsedPro } from '../services/shopService';
+import { flushCounters, trimWindows } from '../services/viralService';
 
 /**
  * Scheduled jobs.
@@ -88,6 +89,32 @@ export function startJobs(): () => void {
       const count = await expireLapsedPro();
       return { expired: count };
     }),
+
+    /**
+     * Write-behind for feed counters.
+     *
+     * The counterpart to the request path never touching Postgres. Reactions and views
+     * accumulate in Redis; this drains them into the rows on a schedule, turning millions
+     * of tiny writes into one bulk statement a minute.
+     *
+     * Every minute rather than every few seconds because the read path already layers live
+     * Redis counters over the stored row — the database copy is the durable record and the
+     * rebuild source, not what anyone is looking at. A slower cadence costs nothing visible
+     * and buys larger, cheaper batches.
+     *
+     * `SPOP` makes this safe to run on every instance at once: the dirty set is drained
+     * atomically, so two schedulers cannot claim the same photo.
+     */
+    job('feed-counter-flush', '* * * * *', flushCounters),
+
+    /**
+     * Ages photos out of the bounded ranking windows.
+     *
+     * `today` and `week` are membership windows, and membership is the one thing a
+     * time-invariant score cannot express. Trimming on a schedule keeps it out of the read
+     * path, where it would otherwise become a filter on every page build.
+     */
+    job('feed-window-trim', '*/5 * * * *', trimWindows),
   ];
 
   logger.info({ count: tasks.length }, 'scheduled jobs started');

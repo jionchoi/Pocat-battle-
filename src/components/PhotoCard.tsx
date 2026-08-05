@@ -14,32 +14,30 @@ import { Image } from 'expo-image';
 
 import type { Photo } from '../models';
 import {
-  bezelPad,
-  concentric,
   contextColors,
   elevation,
-  innerHighlight,
   perpetual,
   press,
   radii,
-  rarity as rarityTokens,
   spacing,
   staggerDelay,
   text,
   useReduceMotion,
   type ContextName,
 } from '../theme';
-import { RarityPips } from './Badge';
+import { RarityBadge, RarityPips, ScoreChip } from './Badge';
 
 /**
  * PhotoCard — the core content component (README section 6).
  *
- * Two variants: `grid` for the album, `feed` for the community stream. Both use the
- * Double-Bezel, with the tier tinting only the OUTER shell so the photo inside is never
- * colour-cast. That is the mechanic that replaces the brief's gradient border, which is
- * a banned pattern.
+ * Two variants: `grid` for the album, `feed` for the community stream.
  *
- * Tier is conveyed by ring colour, pip count AND the score value — never colour alone.
+ * The photograph runs to the card's own edge. Tier used to be carried by a tinted shell
+ * and a hairline ring around the image, which cost 12pt of a 110pt grid tile and made
+ * every card read as a framed print; it is now a badge worn in the top-right corner of
+ * the image itself, the same as on every other photo surface in the product.
+ *
+ * Tier is conveyed by badge colour, glyph silhouette AND label — never colour alone.
  */
 
 export interface PhotoCardProps {
@@ -62,12 +60,11 @@ export const PhotoCard = React.memo(function PhotoCard({
   variant = 'grid',
   index = 0,
   visible = true,
-  context = 'bone',
+  context = 'paper',
   style,
   footer,
 }: PhotoCardProps) {
   const c = contextColors(context);
-  const spec = rarityTokens[photo.tier];
   const reduceMotion = useReduceMotion();
 
   const pressed = useSharedValue(0);
@@ -94,7 +91,7 @@ export const PhotoCard = React.memo(function PhotoCard({
     ],
   }));
 
-  const outerRadius = variant === 'feed' ? radii.xl : radii.lg + 4;
+  const radius = variant === 'feed' ? radii.xl : radii.lg;
 
   return (
     <Animated.View style={[animated, style]}>
@@ -109,96 +106,66 @@ export const PhotoCard = React.memo(function PhotoCard({
         accessibilityRole="button"
         accessibilityLabel={`${photo.catNickname}, ${photo.tier}, scored ${photo.scores.total}`}
         style={[
-          styles.shell,
-          {
-            backgroundColor: spec.shellTint,
-            borderColor: spec.ring,
-            borderRadius: outerRadius,
-          },
-          elevation(variant === 'feed' ? 'raised' : 'flat', context),
+          styles.card,
+          { backgroundColor: c.surface, borderRadius: radius },
+          elevation(variant === 'feed' ? 'hairline' : 'flat', context),
         ]}
       >
-        <View
-          style={[
-            styles.core,
-            {
-              backgroundColor: c.surface,
-              borderRadius: concentric(outerRadius, bezelPad),
-            },
-            innerHighlight(c.innerHighlight),
-          ]}
-        >
-          <View style={variant === 'feed' ? styles.photoFeed : styles.photoGrid}>
-            <Image
-              source={photo.imageUrl || undefined}
-              contentFit="cover"
-              transition={200}
-              style={StyleSheet.absoluteFill}
-              accessible
-              accessibilityLabel={`Photo of ${photo.catNickname}`}
-            />
+        <View style={variant === 'feed' ? styles.photoFeed : styles.photoGrid}>
+          <Image
+            source={photo.imageUrl || undefined}
+            contentFit="cover"
+            transition={200}
+            style={StyleSheet.absoluteFill}
+            accessible
+            accessibilityLabel={`Photo of ${photo.catNickname}`}
+          />
 
-            {/* Empty-photo state. Storage may be unconfigured locally, and a card with
-                a blank hole reads as a bug rather than as a missing image. */}
-            {!photo.imageUrl ? (
-              <View style={[styles.noPhoto, { backgroundColor: c.sunken }]}>
-                <Text style={[text.caption, { color: c.textFaint }]}>No image</Text>
-              </View>
-            ) : null}
-
-            {photo.tier === 'Legendary' ? (
-              <RaritySheen visible={visible} radius={concentric(outerRadius, bezelPad)} />
-            ) : null}
-
-            <ScoreChip total={photo.scores.total} tier={photo.tier} />
-          </View>
-
-          <View style={styles.meta}>
-            <View style={styles.metaRow}>
-              <Text
-                style={[variant === 'feed' ? text.h3 : text.bodySm, styles.name, { color: c.text }]}
-                numberOfLines={1}
-              >
-                {photo.catNickname}
-              </Text>
-              <RarityPips rarity={photo.tier} context={context} />
+          {/* Empty-photo state. Storage may be unconfigured locally, and a card with
+              a blank hole reads as a bug rather than as a missing image. */}
+          {!photo.imageUrl ? (
+            <View style={[styles.noPhoto, { backgroundColor: c.sunken }]}>
+              <Text style={[text.caption, { color: c.textFaint }]}>No image</Text>
             </View>
+          ) : null}
 
-            {photo.caption ? (
-              <Text style={[text.bodySm, { color: c.textMuted }]} numberOfLines={2}>
-                {photo.caption}
-              </Text>
-            ) : null}
+          {photo.tier === 'Legendary' ? (
+            <RaritySheen visible={visible} radius={radius} />
+          ) : null}
 
-            {photo.badges.length > 0 ? (
-              <Text style={[text.caption, { color: c.textFaint }]} numberOfLines={1}>
-                {photo.badges.join(' · ')}
-              </Text>
-            ) : null}
-
-            {footer}
+          <View style={styles.corners} pointerEvents="none">
+            <ScoreChip score={photo.scores.total} />
+            <RarityBadge rarity={photo.tier} size="sm" compact={variant === 'grid'} />
           </View>
+        </View>
+
+        <View style={styles.meta}>
+          <View style={styles.metaRow}>
+            <Text
+              style={[variant === 'feed' ? text.h3 : text.caption, styles.name, { color: c.text }]}
+              numberOfLines={1}
+            >
+              {photo.catNickname}
+            </Text>
+            {variant === 'feed' ? <RarityPips rarity={photo.tier} context={context} /> : null}
+          </View>
+
+          {photo.caption ? (
+            <Text style={[text.bodySm, { color: c.textMuted }]} numberOfLines={2}>
+              {photo.caption}
+            </Text>
+          ) : null}
+
+          {photo.badges.length > 0 ? (
+            <Text style={[text.captionSm, { color: c.textFaint }]} numberOfLines={1}>
+              {photo.badges.join(' · ')}
+            </Text>
+          ) : null}
+
+          {footer}
         </View>
       </Pressable>
     </Animated.View>
-  );
-});
-
-/** Score overlay on the photo. Mono, so digits do not jitter between cards. */
-const ScoreChip = React.memo(function ScoreChip({
-  total,
-  tier,
-}: {
-  total: number;
-  tier: Photo['tier'];
-}) {
-  const spec = rarityTokens[tier];
-
-  return (
-    <View style={styles.scoreChip}>
-      <Text style={[text.stat, styles.scoreValue]}>{total}</Text>
-      <View style={[styles.scoreRule, { backgroundColor: spec.base }]} />
-    </View>
   );
 });
 
@@ -263,12 +230,18 @@ export const RaritySheen = React.memo(function RaritySheen({
 });
 
 const styles = StyleSheet.create({
-  shell: {
-    borderWidth: 1,
-    padding: bezelPad,
-  },
-  core: {
+  card: {
     overflow: 'hidden',
+  },
+  corners: {
+    position: 'absolute',
+    top: spacing.xs,
+    left: spacing.xs,
+    right: spacing.xs,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: spacing.xxs,
   },
   photoGrid: {
     width: '100%',
@@ -283,32 +256,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  scoreChip: {
-    position: 'absolute',
-    left: spacing.xs,
-    bottom: spacing.xs,
-    paddingHorizontal: spacing.xs,
-    paddingTop: 2,
-    paddingBottom: 3,
-    borderRadius: radii.sm,
-    // Warm near-black scrim rather than pure #000, and opaque enough that the number
-    // stays legible over a bright photo.
-    backgroundColor: 'rgba(20, 18, 15, 0.72)',
-    alignItems: 'center',
-    gap: 3,
-  },
-  scoreValue: {
-    color: '#F5F1EB',
-    fontSize: 13,
-    lineHeight: 16,
-  },
-  scoreRule: {
-    height: 2,
-    width: '100%',
-    borderRadius: 1,
-  },
   meta: {
-    padding: spacing.sm,
+    paddingHorizontal: spacing.xs + 2,
+    paddingTop: spacing.xs,
+    paddingBottom: spacing.xs + 2,
     gap: spacing.xxs,
   },
   metaRow: {

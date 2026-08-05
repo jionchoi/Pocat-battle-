@@ -9,6 +9,7 @@ import { logger } from '../logger';
 import { identityKey, matchCat } from './catMatcher';
 import { readImageSignals } from './imageSignals';
 import { recordSighting } from './mapService';
+import { rerank } from './viralService';
 import { grantXp } from './progressionService';
 import { detectCoat } from './rarityDetector';
 import { scorePhoto } from './scoringEngine';
@@ -245,6 +246,20 @@ export async function submitCapture(input: CaptureInput): Promise<CaptureOutcome
 
       return { photo, cat, entry, xp, xpAwarded };
     });
+
+    if (input.shareToFeed) {
+      // Enter the ranking at the zero-engagement baseline, where ordering is purely
+      // chronological — so a brand-new photo appears at the top of "today" immediately and
+      // then has to earn its place. Fire-and-forget: the ranking is a cache, and the flush
+      // job re-places the photo anyway the first time anyone reacts to it.
+      rerank({
+        photoId: result.photo.id,
+        capturedAt: result.photo.capturedAt,
+        reactions: 0,
+        views: 0,
+        communityScore: 0,
+      }).catch((err) => logger.error({ err }, 'initial rank failed'));
+    }
 
     if (input.logSighting) {
       // A sighting is a side effect of the capture, not a precondition for it. A failure

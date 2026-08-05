@@ -28,7 +28,7 @@ export const ChallengeBanner = React.memo(function ChallengeBanner({
   challenge,
   onEnter,
   onViewEntries,
-  context = 'bone',
+  context = 'paper',
   style,
 }: {
   challenge: Challenge;
@@ -99,7 +99,7 @@ export const ChallengeBanner = React.memo(function ChallengeBanner({
 export const PastChallengeRow = React.memo(function PastChallengeRow({
   challenge,
   onPress,
-  context = 'bone',
+  context = 'paper',
 }: {
   challenge: Challenge;
   onPress: () => void;

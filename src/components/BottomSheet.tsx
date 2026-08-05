@@ -17,12 +17,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X } from 'phosphor-react-native';
 
 import {
-  concentric,
   contextColors,
   elevation,
   hitSlopFor,
   icon,
-  innerHighlight,
   radii,
   spacing,
   spring,
@@ -56,7 +54,7 @@ export function BottomSheet({
   onClose,
   title,
   children,
-  context = 'bone',
+  context = 'paper',
   scrollable = false,
 }: BottomSheetProps) {
   const c = contextColors(context);
@@ -106,8 +104,7 @@ export function BottomSheet({
           style={[
             styles.sheetShell,
             {
-              backgroundColor: c.sunken,
-              borderColor: c.hairline,
+              backgroundColor: c.bg,
               paddingBottom: insets.bottom + spacing.xs,
             },
             elevation('modal', context),
@@ -116,13 +113,7 @@ export function BottomSheet({
         >
           <View style={[styles.grabber, { backgroundColor: c.hairlineHi }]} />
 
-          <View
-            style={[
-              styles.sheetCore,
-              { backgroundColor: c.surface },
-              innerHighlight(c.innerHighlight),
-            ]}
-          >
+          <View style={styles.sheetCore}>
             {title ? (
               <View style={styles.header}>
                 <Text style={[text.h2, { color: c.text, flex: 1 }]}>{title}</Text>
@@ -158,7 +149,7 @@ export function ConfirmSheet({
   destructive = false,
   onConfirm,
   onCancel,
-  context = 'bone',
+  context = 'paper',
 }: {
   visible: boolean;
   title: string;
@@ -199,7 +190,6 @@ export function ConfirmSheet({
 }
 
 const SHEET_RADIUS = radii.xxl;
-const SHELL_PAD = 8;
 
 const styles = StyleSheet.create({
   root: {
@@ -209,12 +199,14 @@ const styles = StyleSheet.create({
   scrim: {
     ...StyleSheet.absoluteFillObject,
   },
+  /**
+   * One surface, not a shell wrapping a core. The sheet already separates itself from
+   * what is behind it with a scrim and a modal-weight shadow; a second inner panel inside
+   * that was drawing a boundary the scrim had already drawn.
+   */
   sheetShell: {
     borderTopLeftRadius: SHEET_RADIUS,
     borderTopRightRadius: SHEET_RADIUS,
-    borderWidth: 1,
-    borderBottomWidth: 0,
-    paddingHorizontal: SHELL_PAD,
     paddingTop: spacing.xs,
   },
   grabber: {
@@ -225,11 +217,9 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   sheetCore: {
-    borderTopLeftRadius: concentric(SHEET_RADIUS, SHELL_PAD),
-    borderTopRightRadius: concentric(SHEET_RADIUS, SHELL_PAD),
-    borderBottomLeftRadius: radii.lg,
-    borderBottomRightRadius: radii.lg,
-    padding: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.lg,
+    paddingTop: spacing.xs,
   },
   header: {
     flexDirection: 'row',
