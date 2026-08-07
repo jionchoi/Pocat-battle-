@@ -10,9 +10,7 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "docker:build": "docker build -t cat-frame-server .",
-    "docker:run": "docker run --rm --env-file ./.env -p 4000:4000 cat-frame-server",
-    "docker:up": "docker compose up --build",
-    "docker:down": "docker compose down"
+    "docker:run": "docker run --rm --env-file ./.env -p 4000:4000 cat-frame-server"
   },
   "keywords": [],
   "author": "",
