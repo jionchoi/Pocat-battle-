@@ -259,6 +259,15 @@ async function applySession(
      * the player carries on with whatever is cached rather than being asked to set up an
      * account they set up months ago.
      */
+    if (!(err instanceof ProfileMissingError)) {
+      /*
+       * Logged, because this branch is where a real failure goes to be quiet. A schema or
+       * policy mistake arrives here looking exactly like a flaky network, and the symptom
+       * is an app that opens on an empty home screen with nothing said about why.
+       */
+      console.warn('[auth] could not load profile:', err);
+    }
+
     set({
       status: 'authenticated',
       profileMissing: err instanceof ProfileMissingError,

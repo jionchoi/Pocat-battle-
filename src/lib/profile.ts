@@ -54,9 +54,20 @@ interface ProfileRow {
   avatar_url: string | null;
   pro_subscription_active: boolean;
   created_at: string;
-  player_stats:
-    | { rank: number; xp: number; best_score: number; likes_received: number }
-    | null;
+  /*
+   * PostgREST returns an embedded to-one relation as an object and a to-many as an array,
+   * and which one it decides this is depends on it recognising `player_stats.user_id` as
+   * both a primary key and a foreign key. Accepting either shape costs one line and
+   * removes a whole class of "it worked in the SQL editor" surprise.
+   */
+  player_stats: PlayerStatsRow | PlayerStatsRow[] | null;
+}
+
+interface PlayerStatsRow {
+  rank: number;
+  xp: number;
+  best_score: number;
+  likes_received: number;
 }
 
 /**
@@ -84,7 +95,10 @@ export async function fetchMe(userId: string, email: string | null): Promise<Me>
   if (error?.code === 'PGRST116') throw new ProfileMissingError();
   if (error) throw error;
 
-  const stats = data.player_stats;
+  const stats = Array.isArray(data.player_stats)
+    ? (data.player_stats[0] ?? null)
+    : data.player_stats;
+
   const rank = stats?.rank ?? 1;
   const xp = stats?.xp ?? 0;
 

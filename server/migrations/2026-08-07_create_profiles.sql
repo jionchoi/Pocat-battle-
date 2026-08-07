@@ -100,7 +100,17 @@ comment on table public.profiles is
 -- by an API remembering to be careful.
 
 create table public.player_stats (
-  user_id uuid primary key references auth.users (id) on delete cascade,
+  -- References profiles, not auth.users.
+  --
+  -- Both would cascade correctly, but only this one states the relationship PostgREST
+  -- needs: a client asking for `profiles(..., player_stats(...))` is asking it to follow a
+  -- foreign key, and with both tables pointing at auth.users instead there is no key
+  -- between them to follow. The request fails, and it fails with an error that looks
+  -- nothing like "no such row".
+  --
+  -- It is also the truer statement. Stats belong to a profile; the profile is what belongs
+  -- to an account. The cascade still reaches here from auth.users, one hop further along.
+  user_id uuid primary key references public.profiles (id) on delete cascade,
 
   -- Photographer Rank and its progress. Rank is derived from xp by the game rules; it is
   -- stored rather than recomputed so a leaderboard query does not replay the ramp for
