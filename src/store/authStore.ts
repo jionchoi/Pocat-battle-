@@ -4,7 +4,7 @@ import type { AuthError, Session } from '@supabase/supabase-js';
 import { configureAuth } from '../api/client';
 import { authApi } from '../api/endpoints';
 import { supabase } from '../lib/supabase';
-import { fetchMe, saveOnboarding } from '../lib/profile';
+import { ProfileMissingError, fetchMe, saveOnboarding } from '../lib/profile';
 import type { Me } from '../models';
 
 /**
@@ -36,6 +36,14 @@ interface AuthState {
   status: AuthStatus;
   user: Me | null;
   session: Session | null;
+  /**
+   * Signed in, and we know there is no profile to load — as opposed to not knowing.
+   *
+   * The navigator needs to tell those apart. A player whose row does not exist belongs on
+   * the setup screen; a player whose fetch failed on a bad network belongs wherever they
+   * were, because guessing wrong sends an established account back through onboarding.
+   */
+  profileMissing: boolean;
   error: string | null;
   busy: boolean;
 
@@ -57,6 +65,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   status: 'loading',
   user: null,
   session: null,
+  profileMissing: false,
   error: null,
   busy: false,
 
@@ -116,7 +125,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
      * instant and unconditional — a player tapping it on a dead network must still end up
      * signed out, and `signOut` can reject when it cannot reach the server.
      */
-    set({ status: 'unauthenticated', user: null, session: null, error: null });
+    set({
+      status: 'unauthenticated',
+      user: null,
+      session: null,
+      profileMissing: false,
+      error: null,
+    });
     await supabase.auth.signOut().catch(() => undefined);
   },
 
@@ -141,7 +156,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       await saveOnboarding({ userId: session.user.id, username, avatarUrl });
       const user = await fetchMe(session.user.id, session.user.email ?? null);
-      set({ user, busy: false });
+      set({ user, profileMissing: false, busy: false });
     } catch (err) {
       set({ busy: false, error: messageOf(err) });
       throw err;
@@ -164,7 +179,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     try {
       await authApi.deleteAccount();
-      set({ status: 'unauthenticated', user: null, session: null, busy: false });
+      set({
+        status: 'unauthenticated',
+        user: null,
+        session: null,
+        profileMissing: false,
+        busy: false,
+      });
       await supabase.auth.signOut().catch(() => undefined);
     } catch (err) {
       set({ busy: false, error: messageOf(err) });
@@ -213,7 +234,7 @@ async function applySession(
   get: () => AuthState
 ): Promise<void> {
   if (!session) {
-    set({ status: 'unauthenticated', user: null, session: null });
+    set({ status: 'unauthenticated', user: null, session: null, profileMissing: false });
     return;
   }
 
@@ -228,9 +249,20 @@ async function applySession(
 
   try {
     const user = await fetchMe(session.user.id, session.user.email ?? null);
-    set({ user, status: 'authenticated' });
-  } catch {
-    set({ status: 'authenticated' });
+    set({ user, profileMissing: false, status: 'authenticated' });
+  } catch (err) {
+    /*
+     * Two failures that look alike and must not be treated alike.
+     *
+     * No row means setup never finished, and the navigator sends them to it. Anything else
+     * — a timeout, a dropped connection — means we do not know, so the session stands and
+     * the player carries on with whatever is cached rather than being asked to set up an
+     * account they set up months ago.
+     */
+    set({
+      status: 'authenticated',
+      profileMissing: err instanceof ProfileMissingError,
+    });
   }
 }
 

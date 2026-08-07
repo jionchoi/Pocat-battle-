@@ -15,6 +15,25 @@ import type { Me } from '../models';
  * visible in the schema: `profiles` has an update policy, `player_stats` has none.
  */
 
+/**
+ * Signed in, but there is no profile row to read.
+ *
+ * Distinct from a network failure, and the distinction decides where the player lands: a
+ * missing row means setup has not happened, and they belong on the setup screen. A failed
+ * request means we do not know, and an established account must not be dropped into setup
+ * because a fetch timed out.
+ *
+ * It should be unreachable in normal use — the signup trigger creates the row inside the
+ * same transaction as the account. It happens when that trigger is not installed, which is
+ * exactly the case worth naming rather than swallowing.
+ */
+export class ProfileMissingError extends Error {
+  constructor() {
+    super('No profile row for this account.');
+    this.name = 'ProfileMissingError';
+  }
+}
+
 /** The two tables that exist so far, joined in one round trip. */
 const SELECT = `
   id,
@@ -61,6 +80,8 @@ export async function fetchMe(userId: string, email: string | null): Promise<Me>
     .eq('id', userId)
     .single<ProfileRow>();
 
+  // PGRST116 is PostgREST's "expected one row, got none" from `.single()`.
+  if (error?.code === 'PGRST116') throw new ProfileMissingError();
   if (error) throw error;
 
   const stats = data.player_stats;
@@ -109,13 +130,18 @@ export async function saveOnboarding(params: {
   username: string;
   avatarUrl?: string;
 }): Promise<void> {
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('profiles')
     .update({
       username: params.username,
       ...(params.avatarUrl ? { avatar_url: params.avatarUrl } : {}),
     })
-    .eq('id', params.userId);
+    .eq('id', params.userId)
+    // Selecting back is what makes a no-op detectable. An UPDATE that matches no rows —
+    // because the row is missing, or because a policy hid it — is a success with a count
+    // of zero, and without this the setup screen would congratulate the player and send
+    // them into an app that still has no profile.
+    .select('id');
 
   if (error) {
     // 23505 is Postgres' unique violation. Everything else is unexpected and says so.
@@ -124,6 +150,8 @@ export async function saveOnboarding(params: {
     }
     throw error;
   }
+
+  if (!data || data.length === 0) throw new ProfileMissingError();
 }
 
 /** XP still to earn before the next rank. Zero at the top of the ramp. */

@@ -227,10 +227,13 @@ export function RootNavigator() {
    * database trigger, and onboarding is where a player chooses it. So "has no username" is
    * exactly "has not finished setting up", with no second field to keep in step.
    *
-   * Requires a loaded profile: launching offline keeps the session but leaves `user` null,
-   * and an established account must not be dropped into setup because a fetch failed.
+   * Two ways to qualify. Either the profile loaded and carries no username, or there is no
+   * profile row at all — which the store reports separately from "the fetch failed",
+   * because an established account must not be dropped into onboarding by a bad network.
    */
-  const needsSetup = useAuthStore((s) => s.user !== null && !s.user.username);
+  const needsSetup = useAuthStore(
+    (s) => s.profileMissing || (s.user !== null && !s.user.username)
+  );
   const [minimumElapsed, setMinimumElapsed] = useState(false);
 
   useEffect(() => {
