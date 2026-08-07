@@ -5,8 +5,8 @@ import { z } from 'zod';
  *
  * The model decides the score. Not a rule engine with the model feeding it labels — the
  * model looks at the photograph and says what it is worth. That is the design, and this
- * file exists to make it a design rather than a shrug: it pins the ranges, the vocabulary,
- * the output shape and the version, so that "the AI decided" is still something you can
+ * file exists to make it a design rather than a shrug: it pins the vocabulary, the output
+ * shape, the guidance and the version, so that "the AI decided" is still something you can
  * reason about afterwards.
  *
  * ## What is fixed and what is free
@@ -14,8 +14,11 @@ import { z } from 'zod';
  * Free: which photo scores what. The rubric below is guidance, not arithmetic, and there
  * is no post-hoc adjustment of the model's numbers anywhere in the pipeline.
  *
- * Fixed: the four components, their ranges, and the fact that the total is their sum. The
- * model is not asked for a total, because a model asked for both components and a total
+ * Fixed: the four components and the fact that the total is their sum. Their ranges are
+ * guidance rather than limits — a photograph that deserves more than the scale suggests
+ * gets it, and the total is free to climb well past 100.
+ *
+ * The model is not asked for a total, because a model asked for both components and a total
  * will sooner or later return components that do not add up to it — and the reveal screen
  * draws the breakdown *and* the total, so the player would be looking at the contradiction.
  *
@@ -47,26 +50,39 @@ import { z } from 'zod';
 export const SCORING_VERSION = '2026-08-07.1';
 
 /**
- * Component ranges.
+ * Component guidance — where a score usually lands, not where it is allowed to.
  *
- * Chosen against the tier thresholds in the client's constants/game.ts — Rare at 50, Epic
- * at 70, Legendary at 90. A merely competent photo of an ordinary cat lands in the fifties;
- * everything above Epic needs the pose or the cat to be genuinely unusual, which is what
- * makes a Legendary worth the crest it gets.
+ * These numbers are handed to the model as the shape of the scale, calibrated against the
+ * client's tier thresholds: Rare at 50, Epic at 70, Legendary at 90. A competent photo of
+ * an ordinary cat lands in the fifties, and anything above Epic needs the pose or the
+ * animal to be genuinely unusual.
  *
- * The maximum is 110, deliberately above 100. constants/game.ts states that a total over
- * 100 is expected rather than a bug, and the bonus is where that comes from.
+ * They are not caps. A photograph that deserves more gets more, and a total well past 100
+ * is a legitimate outcome rather than an overflow — constants/game.ts says as much, and
+ * forbids the client from ever drawing the total as a fraction of anything.
  */
-export const SCORE_RANGES = {
+export const SCORE_GUIDANCE = {
   /** Framing, focus, light, subject separation. The photographer's contribution. */
-  composition: { min: 0, max: 40 },
+  composition: { typical: 40 },
   /** How unusual the moment is. A yawn or a mid-air pounce is worth many times a sit. */
-  poseRarity: { min: 0, max: 25 },
+  poseRarity: { typical: 25 },
   /** How unusual the animal is. Markings, coat, condition — not breed pedigree. */
-  catRarity: { min: 0, max: 25 },
+  catRarity: { typical: 25 },
   /** Everything the rubric rewards on top: golden hour, weather, a shot that is simply funny. */
-  bonus: { min: 0, max: 20 },
+  bonus: { typical: 20 },
 } as const;
+
+/**
+ * A guard against a broken reply, and nothing to do with game design.
+ *
+ * With no ceiling in the prompt there is also nothing stopping a malformed response from
+ * carrying 900000, and an integer that large survives the database column, reaches the
+ * leaderboard and shreds every layout it passes through. This rejects the response instead.
+ *
+ * Set far above anything the rubric could reasonably produce. If the scale ever genuinely
+ * needs headroom past this, raise it deliberately — do not remove it.
+ */
+const SANITY_MAX = 500;
 
 /**
  * How many scores a player may reveal in a rolling 24 hours.
@@ -114,11 +130,15 @@ export const scoringResponseSchema = z.object({
 
   pose: z.enum(POSE_CLASSES),
 
+  /*
+   * Floored at zero and bounded only by the sanity guard. The rubric says where scores
+   * usually land; it does not forbid going past it, so neither does this.
+   */
   scores: z.object({
-    composition: z.number().int().min(0).max(SCORE_RANGES.composition.max),
-    poseRarity: z.number().int().min(0).max(SCORE_RANGES.poseRarity.max),
-    catRarity: z.number().int().min(0).max(SCORE_RANGES.catRarity.max),
-    bonus: z.number().int().min(0).max(SCORE_RANGES.bonus.max),
+    composition: z.number().int().min(0).max(SANITY_MAX),
+    poseRarity: z.number().int().min(0).max(SANITY_MAX),
+    catRarity: z.number().int().min(0).max(SANITY_MAX),
+    bonus: z.number().int().min(0).max(SANITY_MAX),
   }),
 
   /**
@@ -218,15 +238,19 @@ photograph it appears in and nothing else.
 `.trim();
 
 /**
- * Assembled at call time so the ranges can never drift from the schema that validates the
- * reply — both read `SCORE_RANGES`.
+ * Assembled at call time so the guidance in the prompt can never drift from the guidance in
+ * this file — there is one source for both.
  */
 export function buildScoringPrompt(): string {
   return [
     SCORING_RUBRIC,
     '',
     'Return the four component scores only. Do not return a total; it is computed as their sum.',
-    `Ranges: composition 0-${SCORE_RANGES.composition.max}, poseRarity 0-${SCORE_RANGES.poseRarity.max}, ` +
-      `catRarity 0-${SCORE_RANGES.catRarity.max}, bonus 0-${SCORE_RANGES.bonus.max}.`,
+    'These are the usual ranges, not limits. Stay inside them for almost every photograph,',
+    'and go above one when a photograph has genuinely earned it:',
+    `  composition ~0-${SCORE_GUIDANCE.composition.typical}`,
+    `  poseRarity  ~0-${SCORE_GUIDANCE.poseRarity.typical}`,
+    `  catRarity   ~0-${SCORE_GUIDANCE.catRarity.typical}`,
+    `  bonus       ~0-${SCORE_GUIDANCE.bonus.typical}`,
   ].join('\n');
 }
