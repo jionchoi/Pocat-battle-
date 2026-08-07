@@ -1,0 +1,10 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cat-frame-server
+    env_file:
+      - .env
+    ports:
+      - "${PORT:-4000}:4000"
