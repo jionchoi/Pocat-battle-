@@ -27,7 +27,6 @@ export function SignInSignUpScreen({ navigation }: Props) {
   const [mode, setMode] = useState<Mode>('signup');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [username, setUsername] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const login = useAuthStore((s) => s.login);
@@ -48,13 +47,9 @@ export function SignInSignUpScreen({ navigation }: Props) {
     if (mode === 'signin' && password.length === 0) {
       next.password = 'Enter your password.';
     }
-    if (mode === 'signup' && !/^[a-zA-Z0-9_]{3,20}$/.test(username.trim())) {
-      next.username = '3 to 20 letters, numbers or underscores.';
-    }
-
     setFieldErrors(next);
     return Object.keys(next).length === 0;
-  }, [email, mode, password, username]);
+  }, [email, mode, password]);
 
   const submit = useCallback(async () => {
     clearError();
@@ -65,14 +60,14 @@ export function SignInSignUpScreen({ navigation }: Props) {
         // No navigation here: signing up authenticates, and the root navigator sends a
         // fresh account to the avatar step. Replacing a screen on a stack that is being
         // unmounted in the same commit is how that step got skipped.
-        await signup({ email: email.trim(), password, username: username.trim() });
+        await signup({ email: email.trim(), password });
       } else {
         await login({ email: email.trim(), password });
       }
     } catch {
       // The store already holds the message; the banner below renders it.
     }
-  }, [clearError, email, login, mode, navigation, password, signup, username, validate]);
+  }, [clearError, email, login, mode, password, signup, validate]);
 
   const switchMode = useCallback(() => {
     clearError();
@@ -95,19 +90,15 @@ export function SignInSignUpScreen({ navigation }: Props) {
         <InlineError message={error} style={styles.banner} />
       ) : null}
 
+      {/*
+        No name field here.
+
+        Signing up asks for the two things an account cannot exist without. The trainer
+        name and the avatar are chosen on the setup screen straight afterwards, where
+        there is room to show the avatars being picked between — and where a name that
+        turns out to be taken does not cost the player the whole form.
+      */}
       <View style={styles.form}>
-        {mode === 'signup' ? (
-          <TextField
-            label="Trainer name"
-            value={username}
-            onChangeText={setUsername}
-            placeholder="e.g. bramble_walks"
-            autoCapitalize="none"
-            autoCorrect={false}
-            error={fieldErrors.username}
-            helper="Other players see this on leaderboards."
-          />
-        ) : null}
 
         <TextField
           label="Email"

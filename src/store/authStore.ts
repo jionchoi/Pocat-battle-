@@ -1,43 +1,51 @@
-import * as SecureStore from 'expo-secure-store';
 import { create } from 'zustand';
+import type { AuthError, Session } from '@supabase/supabase-js';
 
+import { configureAuth } from '../api/client';
 import { authApi } from '../api/endpoints';
-import { ApiRequestError, configureAuth } from '../api/client';
+import { supabase } from '../lib/supabase';
+import { fetchMe, saveOnboarding } from '../lib/profile';
 import type { Me } from '../models';
 
 /**
- * Auth session (README section 10).
+ * Auth session.
  *
- * Tokens live in expo-secure-store — the Keychain on iOS, EncryptedSharedPreferences on
- * Android — never in AsyncStorage or MMKV, which are plain files on disk.
+ * Supabase owns the session now. This store owns two things it cannot: the player's
+ * profile, and the single `status` the navigator switches on.
+ *
+ * ## What changed, and why the tokens left secure storage
+ *
+ * This used to mint, persist and rotate its own access and refresh tokens in
+ * expo-secure-store. All of that is gone — issuing, refreshing and revoking are the
+ * platform's job, and every line of it we kept was security-critical code with no product
+ * in it. The session now lives in AsyncStorage because that is what the SDK supports; see
+ * the note in lib/supabase.ts for why that is an acceptable trade and not an oversight.
+ *
+ * ## Nothing here polls
+ *
+ * `onAuthStateChange` is the only source of truth about whether somebody is signed in. It
+ * fires on restore at launch, on sign-in, on sign-out, and on every token refresh —
+ * including refreshes this app did not ask for. Deriving `status` from anywhere else means
+ * two answers to one question, which is how a signed-out player ends up looking at a
+ * cached profile.
  */
-
-const ACCESS_KEY = 'catframe.accessToken';
-const REFRESH_KEY = 'catframe.refreshToken';
 
 export type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated';
 
 interface AuthState {
   status: AuthStatus;
   user: Me | null;
-  accessToken: string | null;
-  refreshToken: string | null;
+  session: Session | null;
   error: string | null;
   busy: boolean;
 
+  /** Starts listening. Called once, from App. */
   hydrate: () => Promise<void>;
-  signup: (params: {
-    email: string;
-    password: string;
-    username: string;
-  }) => Promise<void>;
+  signup: (params: { email: string; password: string }) => Promise<void>;
   login: (params: { email: string; password: string }) => Promise<void>;
-  socialLogin: (params: {
-    provider: 'google' | 'apple';
-    idToken: string;
-  }) => Promise<{ isNewAccount: boolean }>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
+  /** The onboarding step: the username a player picks, and their avatar. */
   setUsername: (params: { username: string; avatarUrl?: string }) => Promise<void>;
   deleteAccount: () => Promise<void>;
   /** Applied after a capture whose response already told us the new totals. */
@@ -48,134 +56,91 @@ interface AuthState {
 export const useAuthStore = create<AuthState>((set, get) => ({
   status: 'loading',
   user: null,
-  accessToken: null,
-  refreshToken: null,
+  session: null,
   error: null,
   busy: false,
 
-  /**
-   * Called once from the splash screen. Restores the session and validates it against the
-   * server, because a stored token may have been revoked while the app was closed.
-   */
   hydrate: async () => {
-    try {
-      const [accessToken, refreshToken] = await Promise.all([
-        SecureStore.getItemAsync(ACCESS_KEY),
-        SecureStore.getItemAsync(REFRESH_KEY),
-      ]);
+    /*
+     * Subscribe before reading.
+     *
+     * `getSession` reads what is on disk and the SDK may refresh it a moment later. A
+     * listener attached afterwards would miss that first event, and the app would run on
+     * an access token it had already replaced.
+     */
+    supabase.auth.onAuthStateChange((_event, session) => {
+      void applySession(session, set, get);
+    });
 
-      if (!accessToken || !refreshToken) {
-        set({ status: 'unauthenticated' });
-        return;
-      }
-
-      set({ accessToken, refreshToken });
-
-      const { user } = await authApi.me();
-      set({ user, status: 'authenticated' });
-    } catch (err) {
-      if (err instanceof ApiRequestError && err.status === 0) {
-        // Offline at launch. Keep the stored session and let the player in — the album
-        // is cached locally, so the app is usable until connectivity returns.
-        set({
-          status: get().accessToken ? 'authenticated' : 'unauthenticated',
-          error: null,
-        });
-        return;
-      }
-
-      await clearTokens();
-      set({ status: 'unauthenticated', user: null, accessToken: null, refreshToken: null });
-    }
+    const { data } = await supabase.auth.getSession();
+    await applySession(data.session, set, get);
   },
 
-  signup: async (params) => {
+  /**
+   * Signing up does not ask for a username.
+   *
+   * It is chosen on the setup screen, after the account exists — which is why the profile
+   * row is created by a database trigger with `username` null, and why the navigator holds
+   * a player there until they pick one.
+   */
+  signup: async ({ email, password }) => {
     set({ busy: true, error: null });
-    try {
-      const result = await authApi.signup(params);
-      await persistTokens(result.accessToken, result.refreshToken);
-      set({
-        accessToken: result.accessToken,
-        refreshToken: result.refreshToken,
-        user: result.user,
-        status: 'authenticated',
-        busy: false,
-      });
-    } catch (err) {
-      set({ busy: false, error: messageOf(err) });
-      throw err;
+
+    const { error } = await supabase.auth.signUp({ email, password });
+
+    if (error) {
+      set({ busy: false, error: messageOf(error) });
+      throw error;
     }
+
+    // `onAuthStateChange` sets the user and the status. Only `busy` belongs to this call.
+    set({ busy: false });
   },
 
-  login: async (params) => {
+  login: async ({ email, password }) => {
     set({ busy: true, error: null });
-    try {
-      const result = await authApi.login(params);
-      await persistTokens(result.accessToken, result.refreshToken);
-      set({
-        accessToken: result.accessToken,
-        refreshToken: result.refreshToken,
-        user: result.user,
-        status: 'authenticated',
-        busy: false,
-      });
-    } catch (err) {
-      set({ busy: false, error: messageOf(err) });
-      throw err;
-    }
-  },
 
-  socialLogin: async (params) => {
-    set({ busy: true, error: null });
-    try {
-      const result = await authApi.social(params);
-      await persistTokens(result.accessToken, result.refreshToken);
-      set({
-        accessToken: result.accessToken,
-        refreshToken: result.refreshToken,
-        user: result.user,
-        status: 'authenticated',
-        busy: false,
-      });
-      return { isNewAccount: result.isNewAccount ?? false };
-    } catch (err) {
-      set({ busy: false, error: messageOf(err) });
-      throw err;
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+
+    if (error) {
+      set({ busy: false, error: messageOf(error) });
+      throw error;
     }
+
+    set({ busy: false });
   },
 
   logout: async () => {
-    const { refreshToken } = get();
-
-    // Revoke server-side, but never block sign-out on the network. A player tapping
-    // "sign out" must always end up signed out locally.
-    if (refreshToken) {
-      authApi.logout(refreshToken).catch(() => undefined);
-    }
-
-    await clearTokens();
-    set({
-      status: 'unauthenticated',
-      user: null,
-      accessToken: null,
-      refreshToken: null,
-      error: null,
-    });
+    /*
+     * Local state is cleared here rather than left to the listener. Sign-out has to be
+     * instant and unconditional — a player tapping it on a dead network must still end up
+     * signed out, and `signOut` can reject when it cannot reach the server.
+     */
+    set({ status: 'unauthenticated', user: null, session: null, error: null });
+    await supabase.auth.signOut().catch(() => undefined);
   },
 
   refreshUser: async () => {
+    const session = get().session;
+    if (!session) return;
+
     try {
-      const { user } = await authApi.me();
+      const user = await fetchMe(session.user.id, session.user.email ?? null);
       set({ user });
     } catch {
       // A failed profile refresh is not worth interrupting the player for.
     }
   },
 
-  setUsername: async (params) => {
+  setUsername: async ({ username, avatarUrl }) => {
+    const session = get().session;
+    if (!session) return;
+
     set({ busy: true, error: null });
+
     try {
-      const { user } = await authApi.setUsername(params);
+      await saveOnboarding({ userId: session.user.id, username, avatarUrl });
+      const user = await fetchMe(session.user.id, session.user.email ?? null);
       set({ user, busy: false });
     } catch (err) {
       set({ busy: false, error: messageOf(err) });
@@ -183,18 +148,24 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
+  /**
+   * Deleting an account is the one auth action the app cannot perform itself.
+   *
+   * Removing a row from `auth.users` needs the admin API, which needs the service-role
+   * key, which must never be in a bundle. So it goes through our server, which holds that
+   * key — and the cascade on both tables takes the profile and the stats with it.
+   *
+   * The route does not exist yet. Until it does this reports a clear failure rather than
+   * pretending, because the alternative is a screen that says an account is gone while it
+   * is still there.
+   */
   deleteAccount: async () => {
     set({ busy: true, error: null });
+
     try {
       await authApi.deleteAccount();
-      await clearTokens();
-      set({
-        status: 'unauthenticated',
-        user: null,
-        accessToken: null,
-        refreshToken: null,
-        busy: false,
-      });
+      set({ status: 'unauthenticated', user: null, session: null, busy: false });
+      await supabase.auth.signOut().catch(() => undefined);
     } catch (err) {
       set({ busy: false, error: messageOf(err) });
       throw err;
@@ -203,9 +174,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   /**
    * Local nudge so the profile meter moves the instant a capture is scored, without a
-   * second round trip. The authoritative rank comes back on the next `refreshUser`;
-   * this only advances XP and the lifetime score, never the rank itself, because
-   * recomputing a rank client-side would be the one number worth forging.
+   * second round trip. The authoritative rank comes back on the next `refreshUser`; this
+   * only advances XP and the lifetime score, never the rank itself, because recomputing a
+   * rank client-side would be the one number worth forging.
    */
   applyCaptureRewards: ({ xpAwarded, scoreAwarded }) => {
     const user = get().user;
@@ -225,57 +196,75 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   clearError: () => set({ error: null }),
 }));
 
-async function persistTokens(accessToken: string, refreshToken: string): Promise<void> {
-  await Promise.all([
-    SecureStore.setItemAsync(ACCESS_KEY, accessToken),
-    SecureStore.setItemAsync(REFRESH_KEY, refreshToken),
-  ]);
-}
+/**
+ * The one place `status` is decided.
+ *
+ * Signed out is immediate. Signed in waits for the profile, because the navigator's setup
+ * gate reads `user.username` — flipping to `authenticated` with a null user would show the
+ * main tabs for one frame before bouncing a new account to the setup screen.
+ *
+ * A profile that fails to load is not treated as signed out. The session is real, the
+ * device may simply be offline at launch, and dropping someone to the sign-in screen
+ * because a fetch timed out would ask them to re-enter a password they had never lost.
+ */
+async function applySession(
+  session: Session | null,
+  set: (partial: Partial<AuthState>) => void,
+  get: () => AuthState
+): Promise<void> {
+  if (!session) {
+    set({ status: 'unauthenticated', user: null, session: null });
+    return;
+  }
 
-async function clearTokens(): Promise<void> {
-  await Promise.all([
-    SecureStore.deleteItemAsync(ACCESS_KEY),
-    SecureStore.deleteItemAsync(REFRESH_KEY),
-  ]);
+  set({ session });
+
+  // A token refresh fires this again with a profile already in hand. Refetching on every
+  // refresh would put a network call on a timer for no new information.
+  if (get().user?.id === session.user.id) {
+    set({ status: 'authenticated' });
+    return;
+  }
+
+  try {
+    const user = await fetchMe(session.user.id, session.user.email ?? null);
+    set({ user, status: 'authenticated' });
+  } catch {
+    set({ status: 'authenticated' });
+  }
 }
 
 function messageOf(err: unknown): string {
-  if (err instanceof ApiRequestError) return err.message;
+  if (err && typeof err === 'object' && 'message' in err) {
+    return String((err as AuthError).message);
+  }
   return 'Something went wrong. Try again.';
 }
 
 /**
- * Give the API client access to the token and the refresh routine.
+ * Give the API client the session's access token.
  *
  * Injected rather than imported so the dependency runs one way: the store imports the
  * client, and the client calls back into these closures.
+ *
+ * `getSession` rather than the stored session: the SDK refreshes on its own schedule, and
+ * asking it at call time is the difference between sending the current token and sending
+ * whatever this store last happened to see. It resolves from memory unless the token is
+ * expired, in which case it refreshes — which is also the entire refresh path, so the two
+ * are the same call.
  */
 configureAuth({
-  getAccessToken: () => useAuthStore.getState().accessToken,
+  getAccessToken: () => useAuthStore.getState().session?.access_token ?? null,
 
   refreshTokens: async () => {
-    const { refreshToken } = useAuthStore.getState();
-    if (!refreshToken) return null;
+    const { data } = await supabase.auth.getSession();
 
-    try {
-      const result = await authApi.refresh(refreshToken);
-      await persistTokens(result.accessToken, result.refreshToken);
-      useAuthStore.setState({
-        accessToken: result.accessToken,
-        refreshToken: result.refreshToken,
-      });
-      return result.accessToken;
-    } catch {
-      // Refresh rotation failed, so the session is genuinely over. Signing out here is
-      // what makes the navigator swap to the auth stack rather than looping on 401s.
-      await clearTokens();
-      useAuthStore.setState({
-        status: 'unauthenticated',
-        user: null,
-        accessToken: null,
-        refreshToken: null,
-      });
+    if (!data.session) {
+      useAuthStore.setState({ status: 'unauthenticated', user: null, session: null });
       return null;
     }
+
+    useAuthStore.setState({ session: data.session });
+    return data.session.access_token;
   },
 });

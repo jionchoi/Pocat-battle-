@@ -220,10 +220,17 @@ const SPLASH_MIN_MS = 620;
  */
 export function RootNavigator() {
   const status = useAuthStore((s) => s.status);
-  // Empty until the player picks one, so it doubles as "this account is not set up yet".
-  // Requires a loaded profile: launching offline keeps the session but leaves `user` null,
-  // and an established account must not be dropped into setup just because /me failed.
-  const needsSetup = useAuthStore((s) => s.user !== null && !s.user.avatarUrl);
+  /*
+   * The username is the gate, not the avatar.
+   *
+   * Signup no longer asks for one — the account is created with `username` null by a
+   * database trigger, and onboarding is where a player chooses it. So "has no username" is
+   * exactly "has not finished setting up", with no second field to keep in step.
+   *
+   * Requires a loaded profile: launching offline keeps the session but leaves `user` null,
+   * and an established account must not be dropped into setup because a fetch failed.
+   */
+  const needsSetup = useAuthStore((s) => s.user !== null && !s.user.username);
   const [minimumElapsed, setMinimumElapsed] = useState(false);
 
   useEffect(() => {

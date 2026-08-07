@@ -20,11 +20,21 @@
 create table public.profiles (
   id uuid primary key references auth.users (id) on delete cascade,
 
-  -- Chosen at signup, and the only name anyone else is guaranteed to see.
+  -- The only name anyone else sees. Real names are stored but never displayed.
+  --
+  -- Nullable, because it is chosen during onboarding rather than at signup: between
+  -- creating an account and finishing setup there is a real interval where the player has
+  -- no username, and the honest representation of "not chosen yet" is null. The
+  -- alternative — inventing `player_a1b2c3d4` at signup — is a value that looks chosen,
+  -- can be displayed by accident, and has to be told apart from a real one by guessing at
+  -- its shape.
+  --
+  -- Null is also what the client's setup gate keys off, so an account that never finished
+  -- onboarding cannot reach the rest of the app.
   --
   -- Length and character set are enforced here rather than only in zod: the API will not
   -- be the only thing that ever writes to this table.
-  username text not null,
+  username text,
 
   -- Real names, and deliberately unconstrained beyond a length cap.
   --
@@ -48,11 +58,15 @@ create table public.profiles (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
 
-  constraint profiles_username_length check (char_length(username) between 3 and 20),
+  -- Both checks pass on null, so an unfinished signup is legal; the moment a username is
+  -- set it must be a real one.
+  constraint profiles_username_length
+    check (username is null or char_length(username) between 3 and 20),
 
   -- Letters, digits, underscore. No spaces, and nothing that could be dressed up to look
   -- like another player's name in a leaderboard row.
-  constraint profiles_username_charset check (username ~ '^[A-Za-z0-9_]+$'),
+  constraint profiles_username_charset
+    check (username is null or username ~ '^[A-Za-z0-9_]+$'),
 
   constraint profiles_firstname_length check (firstname is null or char_length(firstname) <= 50),
   constraint profiles_lastname_length check (lastname is null or char_length(lastname) <= 50)
@@ -60,6 +74,9 @@ create table public.profiles (
 
 -- Case-insensitive uniqueness. "Mochi" and "mochi" are the same person to anyone reading a
 -- leaderboard, so they must not be two accounts.
+--
+-- Nulls do not collide with each other in a unique index, so any number of accounts can sit
+-- in onboarding at once without fighting over the empty name.
 create unique index profiles_username_unique_idx on public.profiles (lower(username));
 
 comment on table public.profiles is
@@ -154,10 +171,12 @@ create trigger player_stats_set_updated_at
 -- rights on these tables. search_path is pinned: a SECURITY DEFINER function that resolves
 -- names through the caller's search_path is the classic Postgres privilege-escalation bug.
 --
--- Names and username come from the signup metadata when the client supplied them. A social
--- provider gives given_name / family_name; email signup gives whatever the form collected.
--- Username falls back to a placeholder rather than null, because a null username is a row
--- that violates its own constraint the moment anything reads it.
+-- Names and avatar come from the signup metadata when there is any. A social provider gives
+-- given_name / family_name / picture; email signup gives nothing at all.
+--
+-- Username is deliberately not set here. It is chosen during onboarding, and writing a
+-- placeholder now would mean the setup gate could not tell a chosen name from a generated
+-- one.
 
 create or replace function public.handle_new_user()
 returns trigger
@@ -167,14 +186,10 @@ set search_path = public
 as $$
 declare
   meta jsonb := coalesce(new.raw_user_meta_data, '{}'::jsonb);
-  requested_username text;
 begin
-  requested_username := nullif(trim(meta ->> 'username'), '');
-
-  insert into public.profiles (id, username, firstname, lastname, avatar_url)
+  insert into public.profiles (id, firstname, lastname, avatar_url)
   values (
     new.id,
-    coalesce(requested_username, 'player_' || substr(replace(new.id::text, '-', ''), 1, 8)),
     nullif(trim(coalesce(meta ->> 'firstname', meta ->> 'given_name')), ''),
     nullif(trim(coalesce(meta ->> 'lastname', meta ->> 'family_name')), ''),
     nullif(trim(coalesce(meta ->> 'avatar_url', meta ->> 'picture')), '')

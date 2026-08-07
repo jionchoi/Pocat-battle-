@@ -9,7 +9,6 @@ import type {
   LeaderboardEntry,
   LeaderboardMetric,
   LeaderboardScope,
-  Me,
   Photo,
   PhotoSubmission,
   PhotoSubmissionResult,
@@ -31,14 +30,6 @@ import { api } from './client';
 
 /* ---------------------------------- auth ---------------------------------- */
 
-export interface AuthResponse {
-  accessToken: string;
-  refreshToken: string;
-  expiresIn: number;
-  user: Me;
-  isNewAccount?: boolean;
-}
-
 export interface NotificationPreferences {
   shareCapturesByDefault: boolean;
   pushChallengeResults: boolean;
@@ -47,29 +38,26 @@ export interface NotificationPreferences {
 }
 
 export const authApi = {
-  signup: (body: { email: string; password: string; username: string }) =>
-    api.post<AuthResponse>('/auth/signup', body, { anonymous: true }),
+  /*
+   * Signing up, signing in, refreshing and signing out are gone from here.
+   *
+   * Supabase issues and rotates the session, and the app talks to it directly through
+   * lib/supabase.ts — so an endpoint of ours in front of that would be a second
+   * implementation of the one thing we deliberately stopped writing ourselves.
+   *
+   * Reading and updating a profile are gone too, for a different reason: row level
+   * security already answers "may you see this row" and "may you edit this row", so those
+   * go straight to Postgres from lib/profile.ts. What is left here is the work that needs
+   * a key the app must never hold, or state the database does not own.
+   */
 
-  login: (body: { email: string; password: string }) =>
-    api.post<AuthResponse>('/auth/login', body, { anonymous: true }),
-
-  social: (body: { provider: 'google' | 'apple'; idToken: string }) =>
-    api.post<AuthResponse>('/auth/social', body, { anonymous: true }),
-
-  refresh: (refreshToken: string) =>
-    api.post<{ accessToken: string; refreshToken: string; expiresIn: number }>(
-      '/auth/refresh',
-      { refreshToken },
-      { anonymous: true }
-    ),
-
-  logout: (refreshToken: string) =>
-    api.post<void>('/auth/logout', { refreshToken }, { anonymous: true }),
-
-  me: () => api.get<{ user: Me }>('/auth/me'),
-
-  setUsername: (body: { username: string; avatarUrl?: string }) =>
-    api.patch<{ user: Me }>('/auth/username', body),
+  /**
+   * Removing the account itself.
+   *
+   * Deleting from `auth.users` needs the admin API and therefore the service-role key,
+   * which cannot ship in a bundle. The cascade on profiles and player_stats does the rest.
+   */
+  deleteAccount: () => api.delete<void>('/auth/account'),
 
   setPushToken: (token: string) => api.put<void>('/auth/push-token', { token }),
 
@@ -80,8 +68,6 @@ export const authApi = {
 
   setPreferences: (body: Partial<NotificationPreferences>) =>
     api.patch<{ preferences: NotificationPreferences }>('/auth/preferences', body),
-
-  deleteAccount: () => api.delete<void>('/auth/account'),
 };
 
 /* --------------------------------- photos --------------------------------- */
