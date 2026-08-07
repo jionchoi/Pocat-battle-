@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import './types/index.js';
 import { errorHandler } from './middleware/errorHandler.js';
+import photosRouter from './routes/photos.js';
 
 export const app = express();
 
@@ -19,7 +20,7 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', service: 'cat-frame' });
 });
 
-// Routers mount here as each domain lands. Auth is first; profiles is next.
+app.use('/photos', photosRouter);
 
 // Last, always: everything above reaches error responses by calling next(err).
 app.use(errorHandler);

@@ -22,6 +22,19 @@ const envSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z
     .string()
     .min(1, 'SUPABASE_SERVICE_ROLE_KEY is required'),
+
+  /*
+   * Required, not optional.
+   *
+   * Scoring is the product, so a server that boots without the ability to score is a
+   * server that will accept captures and fail every one of them. Better to refuse to
+   * start and say which variable is missing.
+   */
+  OPENAI_API_KEY: z.string().min(1, 'OPENAI_API_KEY is required'),
+
+  // Named rather than hardcoded: swapping model is a config change plus a SCORING_VERSION
+  // bump, not a code edit. Must accept images and support structured output.
+  OPENAI_SCORING_MODEL: z.string().min(1, 'OPENAI_SCORING_MODEL is required'),
 });
 
 const parsed = envSchema.safeParse(process.env);

@@ -493,7 +493,15 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
 
           <SectionHeader
             title="Sharing"
-            description="Your album is private. Nothing here is visible to anyone until you share it."
+            /*
+              "Not in the feed" rather than "not visible to anyone".
+
+              Photos live in a public storage bucket at an unguessable address: nothing
+              lists them, nothing links them, and the path cannot be walked — but a URL
+              that escaped would still open. The toggle below controls discoverability,
+              which is what it has always actually controlled, so that is what it says.
+            */
+            description="Your album stays out of the feed. Nothing here is shown to other players until you share it."
           />
 
           <DividedGroup>
