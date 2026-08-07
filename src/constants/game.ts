@@ -27,16 +27,33 @@ export const POSE_CLASSES: readonly PoseClass[] = [
   'unknown',
 ];
 
+/**
+ * Floor for Legendary. The server may hold the real bar higher than this — it rises with
+ * what the field is scoring — so the tier this file computes is a preview only. The tier
+ * the server sends with the photo is the one that counts.
+ */
+export const LEGENDARY_BASE_MIN = 90;
+
 /** Tier thresholds on the composite total. Used to preview the tier during the reveal. */
 export const TIER_THRESHOLDS: { tier: Rarity; min: number }[] = [
-  { tier: 'Legendary', min: 86 },
+  { tier: 'Legendary', min: LEGENDARY_BASE_MIN },
   { tier: 'Epic', min: 70 },
   { tier: 'Rare', min: 50 },
   { tier: 'Common', min: 0 },
 ];
 
-export function tierFor(total: number): Rarity {
-  return TIER_THRESHOLDS.find((t) => total >= t.min)?.tier ?? 'Common';
+/**
+ * The total has no upper bound — a score above 100 is expected, not a bug. Nothing here
+ * may reintroduce a ceiling: no `Math.min(total, 100)`, no `total / 100` meter. The
+ * reveal renders it as a numeral for exactly this reason.
+ */
+export function tierFor(total: number, legendaryMin: number = LEGENDARY_BASE_MIN): Rarity {
+  if (total >= Math.max(LEGENDARY_BASE_MIN, legendaryMin)) return 'Legendary';
+
+  return (
+    TIER_THRESHOLDS.filter((t) => t.tier !== 'Legendary').find((t) => total >= t.min)
+      ?.tier ?? 'Common'
+  );
 }
 
 /**

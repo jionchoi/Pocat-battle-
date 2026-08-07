@@ -8,17 +8,17 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
-  Camera,
   Fire,
   MapPin,
+  PawPrint,
   Trophy,
   UserCircle,
   type IconProps,
 } from 'phosphor-react-native';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import { StackActions } from '@react-navigation/native';
 
 import {
-  accentGlow,
   chrome,
   elevation,
   hitSlopFor,
@@ -49,20 +49,9 @@ const TAB_ICONS: Record<string, React.ComponentType<IconProps>> = {
 const TAB_LABELS: Record<string, string> = {
   HomeTab: 'Viral',
   MapTab: 'Map',
-  ChallengesTab: 'Contests',
+  ChallengesTab: 'Challenges',
   ProfileTab: 'You',
 };
-
-/**
- * The album keeps its stack and all its routes — it is where Photo Detail and Cat Dex
- * live, and deep links land in it — but it has no slot in the bar. The shutter takes the
- * centre position instead, and the album is reached from the Profile screen.
- *
- * Filtering here rather than removing the screen from the navigator is deliberate: the
- * route has to stay mounted and navigable for `navigate('AlbumTab', …)` to work from
- * Profile and for a deep link to resolve.
- */
-const HIDDEN_TABS = new Set(['AlbumTab']);
 
 /**
  * Screens that commit to the Arena context hide all chrome.
@@ -72,7 +61,7 @@ const HIDDEN_TABS = new Set(['AlbumTab']);
  */
 const IMMERSIVE_ROUTES = new Set(['Capture', 'ScoreResult']);
 
-const BAR_HEIGHT = 52;
+const BAR_HEIGHT = layout.tabBarHeight;
 const FAB_SIZE = 56;
 /** How far the shutter rises above the pill's top edge. */
 const FAB_RISE = 24;
@@ -131,7 +120,9 @@ export function FloatingTabBar({
     navigation.navigate('MapTab', { screen: 'Capture' });
   }, [navigation]);
 
-  const visible = state.routes.filter((route) => !HIDDEN_TABS.has(route.name));
+  // Every tab is in the bar. The album used to be a hidden fifth one, which is why it had
+  // no way back — it is a set of pushable screens now, not a place.
+  const visible = state.routes;
   const half = Math.ceil(visible.length / 2);
 
   const renderTab = (route: (typeof visible)[number]) => {
@@ -151,7 +142,27 @@ export function FloatingTabBar({
             target: route.key,
             canPreventDefault: true,
           });
-          if (!focused && !event.defaultPrevented) {
+          if (event.defaultPrevented) return;
+
+          /*
+           * A tab is a destination, not a bookmark: pressing one shows that tab's own
+           * screen, whether or not it is the tab you are already on. Without this, a stack
+           * left three screens deep is what you get back when you return to it — the
+           * player pressed "Map" and landed on somebody's profile.
+           *
+           * The nested stack is reset before the switch. It is addressed by its own key so
+           * the action reaches the right navigator even while it sits in the background;
+           * a tab never visited has no state to reset and is already at its root.
+           */
+          const nested = route.state;
+          if (nested && 'key' in nested && nested.key && (nested.index ?? 0) > 0) {
+            navigation.dispatch({
+              ...StackActions.popToTop(),
+              target: nested.key,
+            });
+          }
+
+          if (!focused) {
             navigation.navigate(route.name);
           }
         }}
@@ -188,9 +199,9 @@ export function FloatingTabBar({
 /**
  * The capture shutter.
  *
- * Coral fill, white ring, and a shadow tinted to its own hue. The ring is what reads as
- * the disc punching through the pill rather than resting on it, and the tinted shadow is
- * what stops a saturated button from looking like a flat sticker pasted on the screen.
+ * Coral fill and a white ring. The ring is what reads as the disc punching through the
+ * pill rather than resting on it — it does the separating work on its own, so the disc
+ * carries the same neutral shadow as the pill rather than a glow tinted to its own hue.
  */
 const Shutter = React.memo(function Shutter({ onPress }: { onPress: () => void }) {
   const reduceMotion = useReduceMotion();
@@ -216,8 +227,13 @@ const Shutter = React.memo(function Shutter({ onPress }: { onPress: () => void }
       accessibilityLabel="Photograph a cat"
       style={styles.shutterHit}
     >
-      <Animated.View style={[styles.shutter, accentGlow('fab'), animated]}>
-        <Camera size={24} weight="fill" color={chrome.text} />
+      <Animated.View style={[styles.shutter, elevation('floating', 'paper'), animated]}>
+        {/*
+          A paw, not a camera. Every phone already has a camera button and it says nothing
+          about what this one is for — the paw says "cat" at 24pt with no label, which is
+          the whole job of the centre glyph.
+        */}
+        <PawPrint size={24} weight="fill" color={chrome.text} />
       </Animated.View>
     </Pressable>
   );

@@ -12,6 +12,7 @@
 export {
   colors,
   marmalade,
+  lagoon,
   sage,
   paper,
   arena,
@@ -46,7 +47,6 @@ export { radii, concentric, avatarRadius } from './radii';
 
 export {
   elevation,
-  accentGlow,
   innerHighlight,
   glass,
   type ElevationLevel,
@@ -67,7 +67,6 @@ export {
 export {
   rarity,
   rarityOrder,
-  rarityGlow,
   poseGlyph,
   poseLabel,
   type Rarity,

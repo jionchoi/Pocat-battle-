@@ -2,6 +2,8 @@ import type {
   Cat,
   CatProfile,
   Challenge,
+  ChallengeGoal,
+  ChallengeLeader,
   CatSighting,
   GeoPoint,
   LeaderboardEntry,
@@ -143,8 +145,19 @@ export const catdexApi = {
 
   profile: (catId: string) => api.get<CatProfile>(`/catdex/${catId}`),
 
-  update: (catId: string, body: { nickname?: string; bio?: string }) =>
-    api.patch<{ cat: Cat }>(`/catdex/${catId}`, body),
+  update: (
+    catId: string,
+    /**
+     * `bestPhotoId` pins that photo as the cat's Dex tile instead of the top scorer;
+     * `bestPhotoPinned: false` releases the pin and hands the tile back to it.
+     */
+    body: {
+      nickname?: string;
+      bio?: string;
+      bestPhotoId?: string;
+      bestPhotoPinned?: false;
+    }
+  ) => api.patch<{ cat: Cat }>(`/catdex/${catId}`, body),
 };
 
 /* ----------------------------------- map ---------------------------------- */
@@ -173,8 +186,24 @@ export const mapApi = {
 
 /* ------------------------------- challenges ------------------------------- */
 
+/**
+ * Everything past `active` and `past` is optional, and each surface on the hub drops out
+ * on its own when its field is missing. That keeps an older server from rendering a
+ * skeleton of empty slots.
+ */
+export interface ActiveChallenges {
+  active: Challenge[];
+  past: Challenge[];
+  /** Standing goals — the meters under the hero. */
+  goals?: ChallengeGoal[];
+  /** Who is ahead in the headline challenge. */
+  leader?: ChallengeLeader | null;
+  /** The player's consecutive-capture streak, for the pill beside the title. */
+  streakDays?: number | null;
+}
+
 export const challengeApi = {
-  active: () => api.get<{ active: Challenge[]; past: Challenge[] }>('/challenges/active'),
+  active: () => api.get<ActiveChallenges>('/challenges/active'),
 
   eligiblePhotos: () => api.get<{ photos: Photo[] }>('/challenges/eligible-photos'),
 

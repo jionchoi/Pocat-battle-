@@ -101,22 +101,6 @@ export const rarity: Record<Rarity, RaritySpec> = {
 export const rarityOrder: readonly Rarity[] = ['Common', 'Rare', 'Epic', 'Legendary'];
 
 /**
- * Glow behind a Legendary badge or crest. Returned as a style object rather than a token,
- * because the radius has to scale with whatever it is sitting behind.
- */
-export function rarityGlow(tier: Rarity, radius = 8) {
-  const spec = rarity[tier];
-  if (!spec.sheen) return null;
-
-  return {
-    shadowColor: spec.base,
-    shadowOffset: { width: 0, height: 0 },
-    shadowRadius: radius,
-    shadowOpacity: 0.55,
-  } as const;
-}
-
-/**
  * Poses carry NO colour — eleven more hues would obliterate the accent rule. They are
  * distinguished by glyph and label, rendered in `text` or `textMuted`.
  * Glyph names map to phosphor-react-native icons.

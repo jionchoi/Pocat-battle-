@@ -47,6 +47,8 @@ interface AlbumState {
   setShowcased: (photoId: string, showcased: boolean) => Promise<void>;
   remove: (photoId: string) => Promise<void>;
   renameCat: (catId: string, nickname: string, bio?: string) => Promise<void>;
+  pinDexPhoto: (catId: string, photoId: string) => Promise<void>;
+  unpinDexPhoto: (catId: string) => Promise<void>;
   byId: (photoId: string) => Photo | undefined;
   catById: (catId: string) => Cat | undefined;
   reset: () => void;
@@ -257,6 +259,24 @@ export const useAlbumStore = create<AlbumState>((set, get) => ({
       set({ cats: previous });
       throw err;
     }
+  },
+
+  /**
+   * Makes one photo the cat's Dex tile.
+   *
+   * Not optimistic: the entry the server returns carries the recomputed tier and score
+   * for the pinned shot, and guessing those locally would repaint the tile's bezel in a
+   * colour that the next refresh corrects.
+   */
+  pinDexPhoto: async (catId, photoId) => {
+    const { cat } = await catdexApi.update(catId, { bestPhotoId: photoId });
+    get().upsertCat(cat);
+  },
+
+  /** Releases the pin. Which photo takes the tile is the server's call, not a guess here. */
+  unpinDexPhoto: async (catId) => {
+    const { cat } = await catdexApi.update(catId, { bestPhotoPinned: false });
+    get().upsertCat(cat);
   },
 
   byId: (photoId) => get().photos.find((p) => p.id === photoId),

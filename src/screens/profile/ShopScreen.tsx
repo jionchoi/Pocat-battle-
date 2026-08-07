@@ -8,7 +8,7 @@ import { Card, DividedGroup } from '../../components/Card';
 import { EmptyState, InlineError } from '../../components/EmptyState';
 import { Screen, ScreenHeader, SectionHeader } from '../../components/Screen';
 import { SkeletonList } from '../../components/Skeleton';
-import { SegmentRow } from '../social/LeaderboardScreen';
+import { SegmentRow } from '../../components/SegmentRow';
 import { showToast } from '../../components/Toast';
 import { shopApi, type CatalogResponse } from '../../api/endpoints';
 import type { ShopItemKind } from '../../models';

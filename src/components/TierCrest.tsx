@@ -76,25 +76,10 @@ export const TierCrest = React.memo(function TierCrest({
       style={[styles.wrap, { width: size, height: size }, style]}
     >
       {/*
-        The halo. A radial gradient would be truer to the design, but RN has no radial
-        background and an SVG one would need its own layer over the photo — a blurred
-        shadow at the same hue lands in the same place for a fraction of the cost.
+        No halo. The crest was ringed by a blurred shadow tinted to the tier colour, which
+        is the one effect that reads as generated rather than designed — the hex silhouette
+        and the gradient already carry the tier on their own.
       */}
-      <View
-        pointerEvents="none"
-        style={[
-          styles.halo,
-          {
-            width: size,
-            height: size,
-            borderRadius: size / 2,
-            backgroundColor: spec.base,
-            shadowColor: spec.base,
-            shadowRadius: size * 0.34,
-          },
-        ]}
-      />
-
       <Svg width={size} height={size} style={StyleSheet.absoluteFill}>
         <Defs>
           <LinearGradient id={`crest-${tier}`} x1="0" y1="0" x2="0.6" y2="1">
@@ -115,14 +100,5 @@ const styles = StyleSheet.create({
   wrap: {
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  halo: {
-    position: 'absolute',
-    // The view itself is invisible; only its shadow is wanted. Opacity zero would take
-    // the shadow with it on Android, so the fill is transparent instead.
-    opacity: 0.5,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.9,
-    elevation: 12,
   },
 });

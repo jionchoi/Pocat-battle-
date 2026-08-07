@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { FlatList, RefreshControl, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { FlatList, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Cards, Image as ImageGlyph } from 'phosphor-react-native';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import type { CompositeScreenProps } from '@react-navigation/native';
@@ -8,6 +8,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Button } from '../../components/Button';
 import { EmptyState, InlineError } from '../../components/EmptyState';
 import { PhotoCard } from '../../components/PhotoCard';
+import { pawRefreshControl } from '../../components/PawRefresh';
 import { Screen, ScreenHeader } from '../../components/Screen';
 import { SearchField } from '../../components/TextField';
 import { PhotoCardSkeleton } from '../../components/Skeleton';
@@ -35,6 +36,9 @@ type Props = CompositeScreenProps<
 >;
 
 const COLUMNS = 2;
+
+/** Title, the usage meter and the filter chips, all above the grid. */
+const HEADER_H = 150;
 
 export function PhotoAlbumGridScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
@@ -117,7 +121,11 @@ export function PhotoAlbumGridScreen({ navigation }: Props) {
   const showEmpty = phase === 'ready' && photos.length === 0;
 
   return (
-    <Screen padded={false}>
+    <Screen
+      padded={false}
+      refreshing={phase === 'refreshing'}
+      refreshIndicatorOffset={HEADER_H}
+    >
       <View style={styles.header}>
         <ScreenHeader
           title="Your album"
@@ -216,12 +224,10 @@ export function PhotoAlbumGridScreen({ navigation }: Props) {
           onEndReachedThreshold={0.6}
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={{ itemVisiblePercentThreshold: 40 }}
-          refreshControl={
-            <RefreshControl
-              refreshing={phase === 'refreshing'}
-              onRefresh={() => void load({ force: true })}
-            />
-          }
+          refreshControl={pawRefreshControl({
+            refreshing: phase === 'refreshing',
+            onRefresh: () => void load({ force: true }),
+          })}
           ListFooterComponent={
             loadingMore ? (
               <View style={styles.footer}>

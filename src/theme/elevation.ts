@@ -1,5 +1,5 @@
 import { Platform, ViewStyle } from 'react-native';
-import { marmalade, shadowTint, type ContextName } from './colors';
+import { shadowTint, type ContextName } from './colors';
 
 /**
  * Elevation.
@@ -11,6 +11,13 @@ import { marmalade, shadowTint, type ContextName } from './colors';
  *
  * The two loud steps are reserved: `floating` for the tab bar, which genuinely hovers
  * over scrolling content, and `modal` for sheets.
+ *
+ * ## No coloured shadows
+ *
+ * There is no accent glow and no per-tier halo. A saturated shape dropping a shadow in
+ * its own hue is the single most recognisable tell of generated UI, and it was on the
+ * primary button, the capture shutter, every Legendary badge and the tier crest at once.
+ * Shape, fill and the ring around the shutter carry that work instead.
  */
 
 export type ElevationLevel = 'flat' | 'hairline' | 'raised' | 'floating' | 'modal';
@@ -60,34 +67,6 @@ export function elevation(
     android: {
       elevation: spec.android,
       shadowColor: tint,
-    },
-    default: {},
-  }) as ViewStyle;
-}
-
-/**
- * The accent's own coloured shadow, for the capture FAB and the reveal's primary action.
- *
- * A coral button dropping a neutral grey shadow looks unlit. Tinting the shadow to the
- * button's own hue is what makes it read as emitting rather than merely sitting there —
- * and it is the one place in the product a coloured shadow is allowed.
- */
-export function accentGlow(strength: 'button' | 'fab' = 'button'): ViewStyle {
-  const spec =
-    strength === 'fab'
-      ? { offsetY: 8, radius: 12, opacity: 0.45, android: 10 }
-      : { offsetY: 10, radius: 16, opacity: 0.4, android: 10 };
-
-  return Platform.select<ViewStyle>({
-    ios: {
-      shadowColor: marmalade[600],
-      shadowOffset: { width: 0, height: spec.offsetY },
-      shadowRadius: spec.radius,
-      shadowOpacity: spec.opacity,
-    },
-    android: {
-      elevation: spec.android,
-      shadowColor: marmalade[600],
     },
     default: {},
   }) as ViewStyle;

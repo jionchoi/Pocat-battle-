@@ -43,15 +43,6 @@ export const linking: LinkingOptions<RootStackParamList> = {
             },
           },
 
-          AlbumTab: {
-            screens: {
-              PhotoAlbumGrid: 'album',
-              CatDex: 'catdex',
-              CatProfile: 'cat/:catId',
-              PhotoDetail: 'photo/:photoId',
-            },
-          },
-
           ChallengesTab: {
             screens: {
               ChallengesHub: 'challenges',
@@ -66,6 +57,12 @@ export const linking: LinkingOptions<RootStackParamList> = {
           ProfileTab: {
             screens: {
               Profile: 'me',
+              // The album lives in every stack now; the profile is the one that owns its
+              // URLs, because that is where a player goes looking for their own photos.
+              PhotoAlbumGrid: 'album',
+              CatDex: 'catdex',
+              CatProfile: 'cat/:catId',
+              PhotoDetail: 'photo/:photoId',
               Shop: 'shop',
               Settings: 'settings',
               PrivacyData: 'privacy',

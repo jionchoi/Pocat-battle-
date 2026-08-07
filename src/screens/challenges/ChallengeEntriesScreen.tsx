@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { FlatList, StyleSheet, Text, View } from 'react-native';
 import { Trophy } from 'phosphor-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
@@ -8,6 +8,7 @@ import { Avatar } from '../../components/Avatar';
 import { Badge } from '../../components/Badge';
 import { EmptyState, InlineError } from '../../components/EmptyState';
 import { PhotoCard } from '../../components/PhotoCard';
+import { pawRefreshControl } from '../../components/PawRefresh';
 import { Screen, ScreenHeader } from '../../components/Screen';
 import { PhotoCardSkeleton } from '../../components/Skeleton';
 import { showToast } from '../../components/Toast';
@@ -27,6 +28,9 @@ import type { ChallengesStackParamList } from '../../navigation/types';
  */
 
 type Props = NativeStackScreenProps<ChallengesStackParamList, 'ChallengeEntries'>;
+
+/** Title and subtitle, which sit above the list rather than in it. */
+const HEADER_H = 84;
 
 export function ChallengeEntriesScreen({ route, navigation }: Props) {
   const { challengeId, title } = route.params;
@@ -155,7 +159,7 @@ export function ChallengeEntriesScreen({ route, navigation }: Props) {
   );
 
   return (
-    <Screen padded={false}>
+    <Screen padded={false} refreshing={refreshing} refreshIndicatorOffset={HEADER_H}>
       <View style={styles.header}>
         <ScreenHeader title={title} subtitle="Ranked in judging order." />
         {error ? <InlineError message={error} onRetry={() => void load()} /> : null}
@@ -184,9 +188,10 @@ export function ChallengeEntriesScreen({ route, navigation }: Props) {
             itemVisiblePercentThreshold: 50,
             minimumViewTime: 600,
           }}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} />
-          }
+          refreshControl={pawRefreshControl({
+            refreshing,
+            onRefresh: () => void load(true),
+          })}
         />
       )}
     </Screen>

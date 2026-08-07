@@ -29,6 +29,28 @@ export const marmalade = {
 } as const;
 
 /**
+ * Lagoon — the secondary.
+ *
+ * Coral is the accent and stays the accent: it means "this is the thing to press". Lagoon
+ * means "this is a different kind of thing" — it categorises rather than invites. It earns
+ * its place on screens that were previously all one hue, where a page of coral tiles,
+ * coral meters and coral links had stopped ranking anything because everything was ranked
+ * first. The weekly challenge wears it, so the card at the top of the hub is visibly not
+ * the same object as the achievement rows under it.
+ *
+ * Deep enough to hold white type at 600, and far enough from Rare blue (#3B82F6) that a
+ * tier badge is never mistaken for it.
+ */
+export const lagoon = {
+  /** Tint fill behind lagoon text — chips, badges, tinted tiles. */
+  100: '#E2F3F4',
+  200: '#B9E3E6',
+  500: '#158D96',
+  600: '#0E7078',
+  700: '#0A585F',
+} as const;
+
+/**
  * Sage — NOT a second accent. The muted complement used only where a success state must
  * sit beside neutral content without competing (verified pins, saved ticks, score bonus).
  */
@@ -198,6 +220,7 @@ export function contextColors(name: ContextName): ColorContext {
 
 export const colors = {
   marmalade,
+  lagoon,
   sage,
   paper,
   arena,

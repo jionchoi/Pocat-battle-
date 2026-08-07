@@ -38,6 +38,7 @@ export const CircleButton = React.memo(function CircleButton({
   Glyph,
   onPress,
   accessibilityLabel,
+  accessibilityHint,
   size = 40,
   glyphSize,
   variant = 'glass',
@@ -48,6 +49,8 @@ export const CircleButton = React.memo(function CircleButton({
   Glyph: React.ComponentType<IconProps>;
   onPress: () => void;
   accessibilityLabel: string;
+  /** What happens on press, when the label alone does not say it. */
+  accessibilityHint?: string;
   size?: number;
   glyphSize?: number;
   variant?: 'glass' | 'solid';
@@ -86,6 +89,7 @@ export const CircleButton = React.memo(function CircleButton({
       hitSlop={hitSlopFor(size)}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
+      accessibilityHint={accessibilityHint}
       accessibilityState={{ disabled }}
       style={style}
     >

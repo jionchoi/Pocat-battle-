@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo } from 'react';
 import {
   FlatList,
-  RefreshControl,
   StyleSheet,
   Text,
   View,
@@ -13,6 +12,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RarityChip } from '../../components/Badge';
 import { CatDexEntry } from '../../components/CatDexEntry';
 import { EmptyState } from '../../components/EmptyState';
+import { pawRefreshControl } from '../../components/PawRefresh';
 import { Screen, ScreenHeader } from '../../components/Screen';
 import { PhotoCardSkeleton } from '../../components/Skeleton';
 import { RARITIES } from '../../constants/game';
@@ -33,6 +33,9 @@ import { pluralize } from '../../utils/format';
 type Props = NativeStackScreenProps<AlbumStackParamList, 'CatDex'>;
 
 const COLUMNS = 3;
+
+/** Title, count, tier tally and the explainer line, all above the grid. */
+const HEADER_H = 148;
 
 export function CatDexScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
@@ -113,7 +116,11 @@ export function CatDexScreen({ navigation }: Props) {
   }
 
   return (
-    <Screen padded={false}>
+    <Screen
+      padded={false}
+      refreshing={phase === 'refreshing'}
+      refreshIndicatorOffset={HEADER_H}
+    >
       <View style={styles.header}>
         <ScreenHeader title="Cat Dex" style={styles.title} />
         <Text style={[text.bodySm, styles.subtitle]}>
@@ -132,6 +139,16 @@ export function CatDexScreen({ navigation }: Props) {
             <RarityChip key={tier} rarity={tier} count={count} />
           ))}
         </View>
+
+        {/*
+          Says what a card *is* before the player scrolls a grid of them. The rule about
+          which photo a card shows is invisible otherwise — it only surfaces the day a
+          better shot silently replaces a favourite one, which is the wrong day to learn it.
+        */}
+        <Text style={[text.caption, styles.explainer]}>
+          One card per cat, showing your highest-scoring photo of them. Open any photo to
+          put it on that cat's card instead.
+        </Text>
       </View>
 
       <FlatList
@@ -142,12 +159,10 @@ export function CatDexScreen({ navigation }: Props) {
         columnWrapperStyle={styles.row}
         contentContainerStyle={styles.grid}
         showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={phase === 'refreshing'}
-            onRefresh={() => void loadCatDex()}
-          />
-        }
+        refreshControl={pawRefreshControl({
+          refreshing: phase === 'refreshing',
+          onRefresh: () => void loadCatDex(),
+        })}
       />
     </Screen>
   );
@@ -162,6 +177,10 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     marginTop: spacing.xxs,
+    color: paper.textSubtle,
+  },
+  explainer: {
+    marginTop: spacing.sm,
     color: paper.textSubtle,
   },
   tiers: {

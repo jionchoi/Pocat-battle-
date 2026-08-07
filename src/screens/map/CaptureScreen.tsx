@@ -5,6 +5,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { CaptureOverlay } from '../../components/CaptureOverlay';
+import { ScoringOverlay } from '../../components/ScoringOverlay';
 import { Button } from '../../components/Button';
 import { showToast } from '../../components/Toast';
 import { CAPTURE_CONFIG } from '../../constants/game';
@@ -17,7 +18,7 @@ import { ApiRequestError } from '../../api/client';
 import { preparePhotoForUpload } from '../../services/catDetection';
 import { useAlbumStore } from '../../store/albumStore';
 import { useAuthStore } from '../../store/authStore';
-import { useCaptureStore } from '../../store/captureStore';
+import { CAPTURE_PROGRESS, useCaptureStore } from '../../store/captureStore';
 import { arena, radii, spacing, text } from '../../theme';
 import type { MapStackParamList } from '../../navigation/types';
 
@@ -45,6 +46,10 @@ export function CaptureScreen() {
   const box = useCaptureStore((s) => s.box);
   const setDetection = useCaptureStore((s) => s.setDetection);
   const beginCapture = useCaptureStore((s) => s.beginCapture);
+  const attachLocalPhoto = useCaptureStore((s) => s.attachLocalPhoto);
+  const advance = useCaptureStore((s) => s.advance);
+  const localUri = useCaptureStore((s) => s.localUri);
+  const progress = useCaptureStore((s) => s.progress);
   const beginScoring = useCaptureStore((s) => s.beginScoring);
   const succeed = useCaptureStore((s) => s.succeed);
   const reject = useCaptureStore((s) => s.reject);
@@ -56,7 +61,6 @@ export function CaptureScreen() {
   const shareByDefault = useAuthStore((s) => s.user?.proSubscriptionActive ?? false);
 
   const [ready, setReady] = useState(false);
-  const [shareToFeed, setShareToFeed] = useState(false);
 
   // Guards a double-fire: the shutter tap and the window's auto-capture can land in the
   // same frame, and submitting the same moment twice would cost the player two slots.
@@ -135,7 +139,11 @@ export function CaptureScreen() {
 
         if (!shot?.uri) throw new Error('The camera did not return a photo.');
 
+        // Held for the reveal and for "Save to my phone" — see `localUri` on the store.
+        attachLocalPhoto(shot.uri);
+
         const photoBase64 = await preparePhotoForUpload(shot.uri);
+        advance(CAPTURE_PROGRESS.prepared);
 
         beginScoring(position);
 
@@ -147,7 +155,10 @@ export function CaptureScreen() {
           autoCaptured: auto,
           // Every capture attempt optionally logs a map pin (README 9.6).
           logSighting: true,
-          shareToFeed,
+          // The camera has no share control any more — see CaptureOverlay. Whether a shot
+          // is public is decided on the reveal, with the photo in front of the player;
+          // this only carries the account default (Pro auto-shares).
+          shareToFeed: shareByDefault,
         });
 
         if (result.outcome === 'rejected') {
@@ -163,6 +174,12 @@ export function CaptureScreen() {
         });
 
         succeed(result);
+
+        // Let the scoring ring close before the reveal takes over. Cutting away while the
+        // arc is still filling wastes the one moment the wait was building towards, and
+        // 320ms is under the threshold where a player would call it a delay.
+        await new Promise((resolve) => setTimeout(resolve, 320));
+
         navigation.replace('ScoreResult');
       } catch (err) {
         const message =
@@ -179,7 +196,9 @@ export function CaptureScreen() {
       }
     },
     [
+      advance,
       applyRewards,
+      attachLocalPhoto,
       beginCapture,
       beginScoring,
       detection.bestConfidence,
@@ -188,7 +207,7 @@ export function CaptureScreen() {
       position,
       reject,
       resetCapture,
-      shareToFeed,
+      shareByDefault,
       succeed,
       upsertCat,
       upsertPhoto,
@@ -201,8 +220,7 @@ export function CaptureScreen() {
 
   useEffect(() => {
     resetCapture();
-    setShareToFeed(shareByDefault);
-  }, [resetCapture, shareByDefault]);
+  }, [resetCapture]);
 
   useEffect(() => {
     if (cameraPermission.state === 'undetermined') void cameraPermission.request();
@@ -246,6 +264,10 @@ export function CaptureScreen() {
 
   /* -------------------------------- camera -------------------------------- */
 
+  /** Shutter fired, verdict not yet on screen. `revealed` is the ring's closing frame. */
+  const scoringInProgress =
+    phase === 'capturing' || phase === 'scoring' || phase === 'revealed';
+
   return (
     <View style={styles.root}>
       <CameraView
@@ -258,18 +280,26 @@ export function CaptureScreen() {
       {/* Fixed grain overlay above the preview. Never attached to a scroll container. */}
       <View pointerEvents="none" style={styles.grain} />
 
-      <CaptureOverlay
-        phase={phase}
-        box={box}
-        progress={framing.progress}
-        remainingMs={framing.remainingMs}
-        detectionStreak={detection.streak}
-        framesRequired={CAPTURE_CONFIG.stableDetectionFrames}
-        onShutter={() => void submit(false)}
-        onClose={close}
-        shareToFeed={shareToFeed}
-        onToggleShare={() => setShareToFeed((value) => !value)}
-      />
+      {/*
+        The camera's controls exist while there is a camera to control. Once the shutter
+        has fired they are not disabled — they are gone, replaced by the frozen frame and
+        the scoring ring. Leaving a dimmed shutter and a detection box visible under the
+        wait would show the player two states of the same screen at once.
+      */}
+      {scoringInProgress ? (
+        <ScoringOverlay phase={phase} photoUri={localUri} progress={progress} />
+      ) : (
+        <CaptureOverlay
+          phase={phase}
+          box={box}
+          progress={framing.progress}
+          remainingMs={framing.remainingMs}
+          detectionStreak={detection.streak}
+          framesRequired={CAPTURE_CONFIG.stableDetectionFrames}
+          onShutter={() => void submit(false)}
+          onClose={close}
+        />
+      )}
 
       {phase === 'rejected' ? (
         <RejectionNotice onRetry={resetCapture} onClose={close} />

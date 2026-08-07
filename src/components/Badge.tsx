@@ -15,7 +15,6 @@ import {
   marmalade,
   radii,
   rarity as rarityTokens,
-  rarityGlow,
   semantic,
   spacing,
   text,
@@ -101,7 +100,6 @@ export const RarityBadge = React.memo(function RarityBadge({
   const spec = rarityTokens[rarity];
   const Glyph = RARITY_GLYPHS[rarity];
   const dims = SIZES[size];
-  const glow = rarityGlow(rarity, size === 'lg' ? 10 : 8);
 
   if (compact) {
     const disc = size === 'lg' ? 20 : 16;
@@ -111,7 +109,6 @@ export const RarityBadge = React.memo(function RarityBadge({
         style={[
           styles.disc,
           { width: disc, height: disc, backgroundColor: spec.badge },
-          glow,
           style,
         ]}
       >
@@ -130,7 +127,6 @@ export const RarityBadge = React.memo(function RarityBadge({
           paddingHorizontal: dims.padH,
           paddingVertical: dims.padV,
         },
-        glow,
         style,
       ]}
     >

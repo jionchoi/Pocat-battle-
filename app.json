@@ -57,6 +57,14 @@
         {
           "locationWhenInUsePermission": "CatSnap uses your location to show cat sightings nearby and to recognise the same cat on a later encounter."
         }
+      ],
+      [
+        "expo-media-library",
+        {
+          "savePhotosPermission": "CatSnap saves the photos you took to your library when you ask it to.",
+          "photosPermission": "CatSnap saves the photos you took to your library when you ask it to.",
+          "isAccessMediaLocationEnabled": false
+        }
       ]
     ],
     "extra": {

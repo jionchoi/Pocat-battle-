@@ -101,6 +101,10 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
   const setShared = useAlbumStore((s) => s.setShared);
   const setShowcased = useAlbumStore((s) => s.setShowcased);
   const remove = useAlbumStore((s) => s.remove);
+  const pinDexPhoto = useAlbumStore((s) => s.pinDexPhoto);
+  const unpinDexPhoto = useAlbumStore((s) => s.unpinDexPhoto);
+  const cats = useAlbumStore((s) => s.cats);
+  const loadCatDex = useAlbumStore((s) => s.loadCatDex);
 
   const [photo, setPhoto] = useState<Photo | null>(cached ?? null);
   const [missing, setMissing] = useState(false);
@@ -108,6 +112,25 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
   const [savingCaption, setSavingCaption] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [pinningDex, setPinningDex] = useState(false);
+
+  const dexEntry = photo ? cats.find((c) => c.id === photo.catId) : undefined;
+  /** Pinned by hand to *this* photo — not merely the shot that happens to be winning. */
+  const isDexPhoto = Boolean(
+    photo && dexEntry?.bestPhotoPinned && dexEntry.bestPhotoId === photo.id
+  );
+
+  /*
+   * The Dex row needs the cat's entry to know whether this photo is its cover, and this
+   * screen is reachable from the feed without the Dex ever having been opened. One fetch
+   * when the list is empty is cheaper than a row that shows the wrong state.
+   */
+  useEffect(() => {
+    if (cats.length === 0) void loadCatDex();
+    // Deliberately mount-only: refetching whenever `cats` changes would loop on an
+    // account with no cats yet.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     // Refetch even when cached: reactions and challenge status change server-side, and
@@ -169,6 +192,36 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
       );
     }
   }, [photo, setShowcased]);
+
+  /**
+   * Puts this photo on the cat's Dex card, or hands the card back to the top scorer.
+   *
+   * Every cat you photograph is already in the Dex — that happens at capture. What this
+   * changes is which of your photos the card shows for it, which is otherwise always your
+   * highest-scoring one. Reversible in both directions, because "which picture looks most
+   * like this cat" is a matter of taste and taste changes.
+   */
+  const toggleDexPhoto = useCallback(async () => {
+    if (!photo) return;
+
+    setPinningDex(true);
+    try {
+      if (isDexPhoto) {
+        await unpinDexPhoto(photo.catId);
+        showToast(
+          `${photo.catNickname}'s card is back to your highest-scoring shot.`,
+          'success'
+        );
+      } else {
+        await pinDexPhoto(photo.catId, photo.id);
+        showToast(`This photo is now on ${photo.catNickname}'s Dex card.`, 'success');
+      }
+    } catch {
+      showToast('We could not change that. Try again.', 'error');
+    } finally {
+      setPinningDex(false);
+    }
+  }, [isDexPhoto, photo, pinDexPhoto, unpinDexPhoto]);
 
   const confirmDelete = useCallback(async () => {
     if (!photo) return;
@@ -458,6 +511,33 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
             />
           </DividedGroup>
 
+          {/*
+            The Dex gets its own section and its own paragraph because it is the one
+            control here whose effect is somewhere else in the app. "Save to Dex" on the
+            reveal screen is this same switch, and a player who pressed it there and
+            wondered what moved should find the answer written out here.
+          */}
+          <SectionHeader
+            title="Cat Dex"
+            description={`Your Dex keeps one card per cat. The card shows your highest-scoring photo of that cat unless you choose a different one — it does not change the cat's score, tier or Dex entry, only the picture on the card.`}
+          />
+
+          <DividedGroup>
+            <ToggleRow
+              label={`Use as ${photo.catNickname}'s Dex photo`}
+              hint={
+                isDexPhoto
+                  ? `${photo.catNickname}'s card shows this photo because you chose it.`
+                  : dexEntry?.bestPhotoId === photo.id
+                    ? `This is already on the card as your best shot of ${photo.catNickname}. Turn this on to keep it there even after a higher score.`
+                    : `The card currently shows your highest-scoring shot of ${photo.catNickname}.`
+              }
+              value={isDexPhoto}
+              disabled={pinningDex}
+              onChange={() => void toggleDexPhoto()}
+            />
+          </DividedGroup>
+
           <View style={styles.actions}>
             <Button label="Share this shot" onPress={() => void share()} trailingIcon />
             <Button
@@ -487,11 +567,14 @@ const ToggleRow = React.memo(function ToggleRow({
   label,
   hint,
   value,
+  disabled = false,
   onChange,
 }: {
   label: string;
   hint: string;
   value: boolean;
+  /** Held while the change is in flight, so the switch cannot be flipped twice. */
+  disabled?: boolean;
   onChange: () => void;
 }) {
   return (
@@ -504,6 +587,7 @@ const ToggleRow = React.memo(function ToggleRow({
       <Switch
         value={value}
         onValueChange={onChange}
+        disabled={disabled}
         accessibilityLabel={label}
         trackColor={{ true: marmalade[500], false: paper.hairlineHi }}
         thumbColor={paper.surface}

@@ -152,6 +152,11 @@ export interface Cat {
   nickname?: string;
   bio?: string;
   bestPhotoId: string;
+  /**
+   * True when the player chose the Dex photo by hand. While set, a higher-scoring shot of
+   * the same cat no longer takes the tile.
+   */
+  bestPhotoPinned: boolean;
   encounterCount: number;
   firstSeenLocation: GeoPoint;
   lastSeenAt: string;
@@ -190,6 +195,59 @@ export type ChallengeJudging = 'score' | 'votes';
 
 export type ChallengeStatus = 'upcoming' | 'active' | 'closed';
 
+/**
+ * Which glyph a challenge wears on the hub.
+ *
+ * A closed key rather than an icon name so the server never dictates a client asset: it
+ * says what the challenge is *about*, and the client decides what that looks like. An
+ * unrecognised key falls back to the trophy rather than rendering nothing.
+ */
+export type ChallengeIconKey =
+  | 'rain'
+  | 'sun'
+  | 'night'
+  | 'rarity'
+  | 'community'
+  | 'trophy';
+
+/**
+ * Progress toward a challenge's goal, for the player asking.
+ *
+ * `target` is what finishes it and `current` is where this player is. A community goal
+ * reports the whole field's progress instead — same shape, and `unit` is what makes the
+ * difference legible ("spotted" vs "hunters joined").
+ */
+export interface ChallengeProgress {
+  current: number;
+  target: number;
+  /** Noun or verb completing "3 of 5 ___". Kept server-side so copy is not a deploy. */
+  unit: string;
+}
+
+/**
+ * A standing goal — the quiet list under the weekly challenge.
+ *
+ * Not a challenge: nothing is submitted to a goal and none of them closes on a date. They
+ * are running counts over what the player has already done, which is why the hub draws
+ * them as meters and gives them no tap target.
+ */
+export interface ChallengeGoal {
+  id: string;
+  title: string;
+  description: string;
+  icon: ChallengeIconKey;
+  /** A community goal's meter is the whole neighbourhood's, not this player's. */
+  kind: 'personal' | 'community';
+  progress: ChallengeProgress;
+}
+
+/** Who is winning an in-flight challenge. Only meaningful while it is still open. */
+export interface ChallengeLeader {
+  user: Pick<User, 'id' | 'username' | 'avatarUrl'>;
+  qualifyingShots: number;
+  reactions: number;
+}
+
 export interface Challenge {
   id: string;
   title: string;
@@ -207,6 +265,24 @@ export interface Challenge {
   mySubmissionPhotoId: string | null;
   /** Populated on closed challenges so the winners rail needs no extra fetch. */
   winningPhoto?: PhotoWithAuthor;
+
+  /* --- optional, for the hub's richer surfaces --- */
+
+  /**
+   * Everything below is optional and every one of them renders only when the server sends
+   * it. The hub degrades a row at a time rather than all at once: a challenge with no
+   * `progress` still shows its title, countdown and reward, and a challenge with none of
+   * these is exactly the card that shipped before.
+   */
+
+  /**
+   * What winning pays, derived server-side from the XP rule that actually grants it.
+   * There is no per-challenge badge — do not put one here without shipping one.
+   */
+  reward?: string | null;
+  /** This player's progress, or the field's for a community goal. */
+  progress?: ChallengeProgress | null;
+  icon?: ChallengeIconKey | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -220,6 +296,20 @@ export interface CatSighting {
   photoUrl: string;
   verified: boolean;
   createdAt: string;
+
+  /* --- the capture behind the pin, when there was one --- */
+
+  /**
+   * Score and tier of the photograph that logged this sighting.
+   *
+   * Null for a bare report with no capture behind it, and for a sighting whose photo has
+   * since been deleted — the pin outlives its evidence, because the cat was there either
+   * way. Each field degrades on its own.
+   */
+  score: number | null;
+  tier: Rarity | null;
+  /** Who reported it. Null only if the account is gone. */
+  reporter: { username: string; avatarUrl: string } | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -315,6 +405,16 @@ export interface PublicProfile {
   user: User;
   /** The photos this player chose to showcase, best-first. */
   showcasePhotos: Photo[];
+  /**
+   * Tier counts across their *shared* photos only.
+   *
+   * The photographs themselves are not here and never were sent: a stranger sees the shape
+   * of an album, not its contents. `sharedToFeed` is the public/private line and it is the
+   * player's own switch — counting the full album would leak how much they keep private,
+   * which is exactly the number they decided not to share.
+   */
+  tierCounts: Record<Rarity, number>;
+  /** Public photos, not the album total: how much is kept private is itself private. */
   totalPhotos: number;
   catsDiscovered: number;
   bestScore: number;

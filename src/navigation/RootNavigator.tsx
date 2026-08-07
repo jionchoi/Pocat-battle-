@@ -4,7 +4,6 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 
 import { FloatingTabBar } from './FloatingTabBar';
 import type {
-  AlbumStackParamList,
   AuthStackParamList,
   ChallengesStackParamList,
   HomeStackParamList,
@@ -33,6 +32,7 @@ import { PhotoDetailScreen } from '../screens/album/PhotoDetailScreen';
 import { ChallengesHubScreen } from '../screens/challenges/ChallengesHubScreen';
 import { ChallengeSubmissionScreen } from '../screens/challenges/ChallengeSubmissionScreen';
 import { ChallengeEntriesScreen } from '../screens/challenges/ChallengeEntriesScreen';
+import { AchievementsScreen } from '../screens/challenges/AchievementsScreen';
 import { LeaderboardScreen } from '../screens/social/LeaderboardScreen';
 import { CommunityFeedScreen } from '../screens/social/CommunityFeedScreen';
 import { FriendsListScreen } from '../screens/social/FriendsListScreen';
@@ -58,6 +58,13 @@ const commonStackOptions = {
   headerShown: false,
   // Slide feels wrong for a photo app; a soft fade matches the motion spec's easing.
   animation: 'fade_from_bottom' as const,
+  /*
+   * Faster than the platform default (~350ms on iOS, longer on Android). A push here is
+   * navigation, not an event — at the default duration the fade reads as the app thinking
+   * about it. 200ms is still long enough to show direction, which is the only job the
+   * transition has.
+   */
+  animationDuration: 200,
 } as const;
 
 /* ---------------------------------- stacks --------------------------------- */
@@ -82,6 +89,10 @@ function HomeStack() {
       <HomeNav.Screen name="PhotoDetail" component={PhotoDetailScreen} />
       <HomeNav.Screen name="CatProfile" component={CatProfileScreen} />
       <HomeNav.Screen name="PublicProfile" component={PublicProfileScreen} />
+      {/* The album is not a place of its own. Every tab can push it, so wherever you
+          opened it from stays underneath and back returns there. */}
+      <HomeNav.Screen name="PhotoAlbumGrid" component={PhotoAlbumGridScreen} />
+      <HomeNav.Screen name="CatDex" component={CatDexScreen} />
     </HomeNav.Navigator>
   );
 }
@@ -105,20 +116,18 @@ function MapStack() {
         component={ScoreResultScreen}
         options={{ presentation: 'fullScreenModal', gestureEnabled: false }}
       />
+      {/* The community screens are pushed onto the map's own stack rather than jumped to
+          across tabs, so backing out of them returns to the map the player left. */}
+      <MapNav.Screen name="CommunityFeed" component={CommunityFeedScreen} />
+      <MapNav.Screen name="FriendsList" component={FriendsListScreen} />
+      <MapNav.Screen name="PublicProfile" component={PublicProfileScreen} />
+      {/* The album is not a place of its own. Every tab can push it, so wherever you
+          opened it from stays underneath and back returns there. */}
+      <MapNav.Screen name="PhotoAlbumGrid" component={PhotoAlbumGridScreen} />
+      <MapNav.Screen name="CatDex" component={CatDexScreen} />
+      <MapNav.Screen name="CatProfile" component={CatProfileScreen} />
+      <MapNav.Screen name="PhotoDetail" component={PhotoDetailScreen} />
     </MapNav.Navigator>
-  );
-}
-
-const AlbumNav = createNativeStackNavigator<AlbumStackParamList>();
-
-function AlbumStack() {
-  return (
-    <AlbumNav.Navigator screenOptions={commonStackOptions}>
-      <AlbumNav.Screen name="PhotoAlbumGrid" component={PhotoAlbumGridScreen} />
-      <AlbumNav.Screen name="CatDex" component={CatDexScreen} />
-      <AlbumNav.Screen name="CatProfile" component={CatProfileScreen} />
-      <AlbumNav.Screen name="PhotoDetail" component={PhotoDetailScreen} />
-    </AlbumNav.Navigator>
   );
 }
 
@@ -134,9 +143,16 @@ function ChallengesStack() {
       />
       <ChallengesNav.Screen name="ChallengeEntries" component={ChallengeEntriesScreen} />
       <ChallengesNav.Screen name="Leaderboard" component={LeaderboardScreen} />
+      <ChallengesNav.Screen name="Achievements" component={AchievementsScreen} />
       <ChallengesNav.Screen name="CommunityFeed" component={CommunityFeedScreen} />
       <ChallengesNav.Screen name="FriendsList" component={FriendsListScreen} />
       <ChallengesNav.Screen name="PublicProfile" component={PublicProfileScreen} />
+      {/* The album is not a place of its own. Every tab can push it, so wherever you
+          opened it from stays underneath and back returns there. */}
+      <ChallengesNav.Screen name="PhotoAlbumGrid" component={PhotoAlbumGridScreen} />
+      <ChallengesNav.Screen name="CatDex" component={CatDexScreen} />
+      <ChallengesNav.Screen name="CatProfile" component={CatProfileScreen} />
+      <ChallengesNav.Screen name="PhotoDetail" component={PhotoDetailScreen} />
     </ChallengesNav.Navigator>
   );
 }
@@ -151,6 +167,12 @@ function ProfileStack() {
       <ProfileNav.Screen name="Shop" component={ShopScreen} />
       <ProfileNav.Screen name="Settings" component={SettingsScreen} />
       <ProfileNav.Screen name="PrivacyData" component={PrivacyDataScreen} />
+      {/* The album is not a place of its own. Every tab can push it, so wherever you
+          opened it from stays underneath and back returns there. */}
+      <ProfileNav.Screen name="PhotoAlbumGrid" component={PhotoAlbumGridScreen} />
+      <ProfileNav.Screen name="CatDex" component={CatDexScreen} />
+      <ProfileNav.Screen name="CatProfile" component={CatProfileScreen} />
+      <ProfileNav.Screen name="PhotoDetail" component={PhotoDetailScreen} />
     </ProfileNav.Navigator>
   );
 }
@@ -169,7 +191,6 @@ function MainTabs() {
     >
       <Tabs.Screen name="HomeTab" component={HomeStack} />
       <Tabs.Screen name="MapTab" component={MapStack} />
-      <Tabs.Screen name="AlbumTab" component={AlbumStack} />
       <Tabs.Screen name="ChallengesTab" component={ChallengesStack} />
       <Tabs.Screen name="ProfileTab" component={ProfileStack} />
     </Tabs.Navigator>

@@ -1,12 +1,14 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
-import { UsersThree } from 'phosphor-react-native';
+import { FlatList, StyleSheet, Text, View } from 'react-native';
+import { UserPlus, UsersThree } from 'phosphor-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { feedApi, photoApi } from '../../api/endpoints';
 import { Avatar } from '../../components/Avatar';
+import { CircleButton } from '../../components/CircleButton';
 import { EmptyState, InlineError } from '../../components/EmptyState';
 import { PhotoCard } from '../../components/PhotoCard';
+import { pawRefreshControl } from '../../components/PawRefresh';
 import { Screen, ScreenHeader } from '../../components/Screen';
 import { PhotoCardSkeleton } from '../../components/Skeleton';
 import { showToast } from '../../components/Toast';
@@ -32,6 +34,9 @@ import { relativeTime } from '../../utils/format';
 type Props = NativeStackScreenProps<ChallengesStackParamList, 'CommunityFeed'>;
 
 const SCOPES = ['Everyone', 'Friends'] as const;
+
+/** Title, subtitle and the scope chips, which sit above the list rather than in it. */
+const HEADER_H = 128;
 
 export function CommunityFeedScreen({ navigation }: Props) {
   const myId = useAuthStore((s) => s.user?.id);
@@ -188,11 +193,28 @@ export function CommunityFeedScreen({ navigation }: Props) {
   );
 
   return (
-    <Screen padded={false}>
+    <Screen padded={false} refreshing={refreshing} refreshIndicatorOffset={HEADER_H}>
       <View style={styles.header}>
         <ScreenHeader
           title="Community"
           subtitle="Photos other players chose to share. Newest first."
+          /*
+            The friends list lives behind this button now. It used to be one of three
+            buttons on the Challenges hub; the other two collapsed into the map's layer
+            toggle, and this is the screen with a Friends filter on it — so the place to
+            manage who is in that filter is right here rather than a tab away.
+          */
+          right={
+            <CircleButton
+              Glyph={UserPlus}
+              onPress={() => navigation.navigate('FriendsList')}
+              accessibilityLabel="Friends"
+              variant="solid"
+              context="paper"
+              size={36}
+              glyphSize={18}
+            />
+          }
         />
 
         <FilterChips
@@ -235,12 +257,10 @@ export function CommunityFeedScreen({ navigation }: Props) {
           }}
           onEndReached={() => void loadMore()}
           onEndReachedThreshold={0.6}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={() => void load(scope, true)}
-            />
-          }
+          refreshControl={pawRefreshControl({
+            refreshing,
+            onRefresh: () => void load(scope, true),
+          })}
           ListFooterComponent={
             loadingMore ? <PhotoCardSkeleton index={1} /> : null
           }

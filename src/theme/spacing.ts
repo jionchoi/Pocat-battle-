@@ -44,6 +44,8 @@ export const layout = {
    * floating treatment exists to avoid.
    */
   tabBarLift: spacing.hair,
+  /** Height of the pill itself, shutter excluded. */
+  tabBarHeight: 52,
   /**
    * Bottom padding added to scroll content so the floating bar never covers a row.
    * Clears the whole assembly, shutter included — the shutter breaks out of the pill's

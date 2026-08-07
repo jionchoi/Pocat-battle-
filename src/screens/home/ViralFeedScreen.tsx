@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { FlatList, RefreshControl, StyleSheet, View } from 'react-native';
+import { FlatList, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Camera, Cat, Fire } from 'phosphor-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -8,6 +8,7 @@ import { feedApi, type ViralWindow } from '../../api/endpoints';
 import { CircleButton } from '../../components/CircleButton';
 import { EmptyState, InlineError } from '../../components/EmptyState';
 import { FeedPost } from '../../components/FeedPost';
+import { pawRefreshControl } from '../../components/PawRefresh';
 import { Screen, SectionHeader, Wordmark } from '../../components/Screen';
 import { PhotoCardSkeleton } from '../../components/Skeleton';
 import { TrendingCard } from '../../components/ViralCard';
@@ -17,7 +18,7 @@ import type { PhotoWithAuthor } from '../../models';
 import type { HomeStackParamList } from '../../navigation/types';
 import { useAuthStore } from '../../store/authStore';
 import { useReactionStore } from '../../store/reactionStore';
-import { layout, marmalade, paper, spacing } from '../../theme';
+import { layout, paper, spacing } from '../../theme';
 
 /**
  * The viral feed — the app's home.
@@ -271,7 +272,8 @@ export function ViralFeedScreen({ navigation }: Props) {
           <View style={styles.gutter}>
             <SectionHeader
               title="For you"
-              description="Ranked by reactions and reach, then divided by age — nothing stays on top by being old."
+              description="Cats other people just posted."
+              size="lg"
             />
           </View>
         );
@@ -315,6 +317,11 @@ export function ViralFeedScreen({ navigation }: Props) {
         */}
         <View style={[styles.gutter, styles.masthead]}>
           <Wordmark />
+          {/*
+            A camera, not a paw. The paw is the tab bar's shutter and stays there; up here
+            it was the same glyph doing a second job in a different shape, which reads as a
+            different action. A camera says what the button does without being read twice.
+          */}
           <CircleButton
             Glyph={Camera}
             onPress={() =>
@@ -330,7 +337,12 @@ export function ViralFeedScreen({ navigation }: Props) {
 
         {trending.length > 0 ? (
           <View style={styles.gutter}>
-            <SectionHeader title="Trending now" Glyph={Fire} style={styles.bentoHeader} />
+            <SectionHeader
+              title="Trending now"
+              Glyph={Fire}
+              size="lg"
+              style={styles.bentoHeader}
+            />
           </View>
         ) : null}
 
@@ -351,7 +363,7 @@ export function ViralFeedScreen({ navigation }: Props) {
   );
 
   return (
-    <Screen bleed style={styles.screen}>
+    <Screen bleed style={styles.screen} refreshing={refreshing}>
       <FlatList
         data={rows}
         keyExtractor={(item) => item.key}
@@ -376,16 +388,10 @@ export function ViralFeedScreen({ navigation }: Props) {
         // Prefetch a screen early so the feed does not visibly stall at the bottom.
         onEndReached={() => void loadMore()}
         onEndReachedThreshold={1.5}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => void load(true)}
-            tintColor={marmalade[600]}
-            // The scroller now starts at the top of the window, so Android's spinner would
-            // otherwise drop in behind the status bar.
-            progressViewOffset={insets.top}
-          />
-        }
+        refreshControl={pawRefreshControl({
+          refreshing,
+          onRefresh: () => void load(true),
+        })}
       />
     </Screen>
   );

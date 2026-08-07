@@ -13,49 +13,65 @@ export type AuthStackParamList = {
 };
 
 /**
- * Home — the viral feed and the two places a photo on it leads.
+ * The album screens, which every tab can push.
  *
- * `PhotoDetail` is deliberately duplicated here rather than reached across into the album
- * stack: opening a stranger's photo from the feed and then finding yourself inside your
- * own album's back stack is the kind of navigation bug that is very hard to explain and
- * very easy to hit.
+ * The album used to be a tab of its own — hidden from the bar, but a tab, which is why it
+ * had no way back: a tab root has nothing underneath it to return to. Opening your album
+ * from the map and pressing back left you on the album with nowhere to go.
+ *
+ * So it is not a place, it is a set of screens four different places can push. Wherever
+ * you opened it from is underneath it, and back means what it says.
  */
-export type HomeStackParamList = {
-  ViralFeed: undefined;
-  PhotoDetail: { photoId: string };
-  /**
-   * Duplicated from the album stack for the same reason `PhotoDetail` is: Photo Detail
-   * offers a way through to the cat's Dex entry, and that has to land somewhere inside
-   * the stack the reader is already in rather than teleporting them into their own album.
-   */
-  CatProfile: { catId: string };
-  PublicProfile: { userId: string };
-};
-
-export type MapStackParamList = {
-  Map: undefined;
-  Capture: undefined;
-  ScoreResult: undefined;
-};
-
-export type AlbumStackParamList = {
+export type AlbumRoutes = {
   PhotoAlbumGrid: undefined;
   CatDex: undefined;
   CatProfile: { catId: string };
   PhotoDetail: { photoId: string };
 };
 
-export type ChallengesStackParamList = {
-  ChallengesHub: undefined;
-  ChallengeSubmission: { challengeId: string; title: string };
-  ChallengeEntries: { challengeId: string; title: string };
-  Leaderboard: undefined;
+/** Kept as the name the album screens type themselves against. */
+export type AlbumStackParamList = AlbumRoutes;
+
+export type HomeStackParamList = AlbumRoutes & {
+  ViralFeed: undefined;
+  PublicProfile: { userId: string };
+};
+
+/**
+ * The social screens, which hang off two tabs.
+ *
+ * The community feed is reachable from the map — the map is the screen where the other
+ * players are — and from the challenges tab, which is where the standings live. It has to
+ * be a route *in each stack* rather than one route jumped to across tabs: a player who
+ * opens the feed from the map and presses back expects the map, and a cross-tab jump hands
+ * them the challenges hub instead, which is a screen they never asked for.
+ *
+ * Same reasoning as the duplicated `PhotoDetail` above, and the same cost: the two copies
+ * are separate history entries, which is exactly what makes back mean "where I came from".
+ */
+export type SocialRoutes = {
   CommunityFeed: undefined;
   FriendsList: undefined;
   PublicProfile: { userId: string };
 };
 
-export type ProfileStackParamList = {
+export type MapStackParamList = SocialRoutes &
+  AlbumRoutes & {
+    Map: undefined;
+    Capture: undefined;
+    ScoreResult: undefined;
+  };
+
+export type ChallengesStackParamList = SocialRoutes &
+  AlbumRoutes & {
+    ChallengesHub: undefined;
+    ChallengeSubmission: { challengeId: string; title: string };
+    ChallengeEntries: { challengeId: string; title: string };
+    Leaderboard: undefined;
+    Achievements: undefined;
+  };
+
+export type ProfileStackParamList = AlbumRoutes & {
   Profile: undefined;
   PublicProfile: { userId: string };
   Shop: undefined;
@@ -64,16 +80,18 @@ export type ProfileStackParamList = {
 };
 
 /**
- * Five tabs, home first.
+ * Four tabs, home first.
  *
  * The map used to be the landing surface, which framed the product as a location game
  * that happened to store photos. It is a cat photo network: what other people posted is
  * the reason to open the app, and the map is where you go to add to it.
+ *
+ * There is no album tab. Four things a player can name — trending, the map, the week's
+ * challenges, and themselves — and everything else is a screen one of those four pushes.
  */
 export type MainTabParamList = {
   HomeTab: NavigatorScreenParams<HomeStackParamList>;
   MapTab: NavigatorScreenParams<MapStackParamList>;
-  AlbumTab: NavigatorScreenParams<AlbumStackParamList>;
   ChallengesTab: NavigatorScreenParams<ChallengesStackParamList>;
   ProfileTab: NavigatorScreenParams<ProfileStackParamList>;
 };

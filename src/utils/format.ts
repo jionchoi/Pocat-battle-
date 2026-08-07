@@ -56,6 +56,32 @@ export function countdownLabel(iso: string, now: number = Date.now()): string {
 }
 
 /**
+ * "4d 12h left", "12h 30m left", "8m left". The countdown chip on the challenge hero.
+ *
+ * Two units, never three — "4d 12h 09m" is a bomb timer, and the extra precision is
+ * false anyway on a screen that only re-renders when the player pulls to refresh. The
+ * larger unit is dropped once it hits zero so the chip never reads "0d 12h".
+ *
+ * Distinct from `countdownLabel` on purpose: that one is prose inside a sentence, this
+ * one is a compact figure riding in a pill.
+ */
+export function remainingLabel(iso: string, now: number = Date.now()): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return 'Ends soon';
+
+  const seconds = Math.floor((then - now) / 1000);
+  if (seconds <= 0) return 'Closed';
+
+  const days = Math.floor(seconds / 86_400);
+  const hours = Math.floor((seconds % 86_400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+
+  if (days > 0) return `${days}d ${hours}h left`;
+  if (hours > 0) return `${hours}h ${minutes}m left`;
+  return `${Math.max(1, minutes)}m left`;
+}
+
+/**
  * Compact counts for leaderboards and profile stats. Deliberately not rounded to
  * suspiciously clean numbers.
  */

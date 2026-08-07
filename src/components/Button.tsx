@@ -1,6 +1,5 @@
 import React, { useCallback } from 'react';
 import {
-  ActivityIndicator,
   Pressable,
   StyleSheet,
   Text,
@@ -13,10 +12,11 @@ import Animated, {
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
-import { ArrowUpRight } from 'phosphor-react-native';
+import { ArrowUpRight, type IconProps } from 'phosphor-react-native';
+
+import { PawLoader } from './PawLoader';
 
 import {
-  accentGlow,
   chrome,
   contextColors,
   marmalade,
@@ -42,6 +42,24 @@ export interface ButtonProps {
   context?: ContextName;
   /** Renders the nested trailing icon well. Never a naked glyph. */
   trailingIcon?: boolean;
+  /**
+   * What sits in that well. Defaults to the outward arrow.
+   *
+   * Only meaningful with `trailingIcon`, and deliberately so: a glyph on a button lives
+   * in the well or it does not appear at all.
+   */
+  icon?: React.ComponentType<IconProps>;
+  /**
+   * Which filled treatment a primary button wears.
+   *
+   * `accent` is the coral CTA. `contrast` is the context's own text colour inverted into
+   * a fill — white on the arena, black on paper. It exists for the case where two
+   * buttons must both read as primary and must not read as the same button: two coral
+   * pills side by side are a choice with no shape to it.
+   */
+  tone?: 'accent' | 'contrast';
+  /** Tighter padding and a smaller well, for two buttons sharing one row. */
+  compact?: boolean;
   loading?: boolean;
   disabled?: boolean;
   destructive?: boolean;
@@ -67,6 +85,9 @@ export function Button({
   variant = 'primary',
   context = 'paper',
   trailingIcon = false,
+  icon: Glyph = ArrowUpRight,
+  tone = 'accent',
+  compact = false,
   loading = false,
   disabled = false,
   destructive = false,
@@ -106,13 +127,26 @@ export function Button({
 
   const fillColor = destructive ? semantic.danger : marmalade[600];
 
+  // The inverted fill. On the arena that is white on black; on paper, black on white.
+  const contrastFill = context === 'arena' ? chrome.text : chrome.fill;
+  const contrastInk = context === 'arena' ? chrome.fill : chrome.text;
+
   const palette = {
-    primary: {
-      background: fillColor,
-      border: 'transparent',
-      foreground: chrome.text,
-      well: 'rgba(255, 255, 255, 0.18)',
-    },
+    primary:
+      tone === 'contrast' && !destructive
+        ? {
+            background: contrastFill,
+            border: 'transparent',
+            foreground: contrastInk,
+            well:
+              context === 'arena' ? 'rgba(11, 11, 12, 0.10)' : 'rgba(255, 255, 255, 0.18)',
+          }
+        : {
+            background: fillColor,
+            border: 'transparent',
+            foreground: chrome.text,
+            well: 'rgba(255, 255, 255, 0.18)',
+          },
     secondary: {
       background: context === 'arena' ? c.surface : c.sunken,
       // No border. On the light context the fill is already a step off the page, and a
@@ -151,24 +185,31 @@ export function Button({
         style={[
           styles.body,
           variant === 'ghost' ? styles.bodyGhost : styles.bodyFilled,
+          compact && variant !== 'ghost' && styles.bodyCompact,
+          // Filled buttons are padded asymmetrically to seat the trailing well against the
+          // right edge. With the well gone that asymmetry pushes the loader off-centre, so
+          // the padding goes symmetric for as long as it is loading.
+          loading && styles.bodyLoading,
           {
             backgroundColor: palette.background,
             borderColor: palette.border,
             opacity: disabled ? 0.4 : 1,
           },
-          // A coral pill dropping a grey shadow looks unlit; the glow is tinted to the
-          // button's own hue so it reads as emitting. Suppressed when destructive — a
-          // red button that glows is asking to be pressed.
-          variant === 'primary' && !disabled && !destructive && accentGlow('button'),
           bodyStyle,
         ]}
       >
         {loading ? (
-          <ActivityIndicator size="small" color={palette.foreground} />
+          // Three prints rather than one: a button is wide enough for the trail to walk,
+          // and the walk is what keeps a slow upload from reading as a frozen screen.
+          <PawLoader size={icon.size.lg} color={palette.foreground} count={3} label={label} />
         ) : (
           <Text
             numberOfLines={1}
-            style={[text.h3, styles.label, { color: palette.foreground }]}
+            style={[
+              compact ? text.body : text.h3,
+              styles.label,
+              { color: palette.foreground },
+            ]}
           >
             {label}
           </Text>
@@ -176,9 +217,14 @@ export function Button({
 
         {trailingIcon && !loading ? (
           <Animated.View
-            style={[styles.well, { backgroundColor: palette.well }, wellStyle]}
+            style={[
+              styles.well,
+              compact && styles.wellCompact,
+              { backgroundColor: palette.well },
+              wellStyle,
+            ]}
           >
-            <ArrowUpRight
+            <Glyph
               size={icon.size.sm}
               color={palette.foreground}
               weight={icon.weightDefault}
@@ -210,6 +256,20 @@ const styles = StyleSheet.create({
     paddingRight: spacing.xs,
     minHeight: 52,
   },
+  /**
+   * Half-width geometry. The label is the first thing to run out of room in a two-up row,
+   * so the padding and the well give up their space before it does.
+   */
+  bodyCompact: {
+    gap: spacing.xs,
+    paddingLeft: spacing.md,
+    paddingRight: spacing.xxs,
+    minHeight: 48,
+  },
+  bodyLoading: {
+    paddingLeft: 0,
+    paddingRight: 0,
+  },
   bodyGhost: {
     borderRadius: radii.md,
     paddingVertical: spacing.xs,
@@ -226,6 +286,10 @@ const styles = StyleSheet.create({
     borderRadius: radii.full,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  wellCompact: {
+    width: iconWell.size - 4,
+    height: iconWell.size - 4,
   },
 });
 

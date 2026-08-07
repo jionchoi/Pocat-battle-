@@ -5,17 +5,26 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { socialApi } from '../../api/endpoints';
 import { Avatar } from '../../components/Avatar';
-import { Badge } from '../../components/Badge';
-import { Card } from '../../components/Card';
+import { Badge, RarityBadge } from '../../components/Badge';
+import { Card, DividedGroup } from '../../components/Card';
+import { MeterBar } from '../../components/ProgressBar';
+import {
+  BoardTrophy,
+  profileStyles,
+  RankPill,
+  ShowcaseTile,
+  StatRail,
+  SHOWCASE_LIMIT,
+} from '../../components/ProfileParts';
 import { EmptyState, InlineError } from '../../components/EmptyState';
-import { PhotoCard } from '../../components/PhotoCard';
-import { RankChip } from '../../components/LeaderboardRow';
 import { BackButton, Screen, SectionHeader } from '../../components/Screen';
 import { SkeletonBlock } from '../../components/Skeleton';
+import { RARITIES, rankProgress, rankTitle } from '../../constants/game';
+import { useBoardStanding } from '../../hooks/useBoardStanding';
 import type { PublicProfile } from '../../models';
-import { paper, layout, radii, spacing, text } from '../../theme';
+import { paper, layout, marmalade, radii, spacing, text } from '../../theme';
 import type { ChallengesStackParamList } from '../../navigation/types';
-import { compactNumber, relativeTime } from '../../utils/format';
+import { compactNumber, pluralize, relativeTime } from '../../utils/format';
 
 /**
  * Public Profile (README section 5.5).
@@ -31,6 +40,7 @@ type Props = NativeStackScreenProps<ChallengesStackParamList, 'PublicProfile'>;
 export function PublicProfileScreen({ navigation, route }: Props) {
   const { userId } = route.params;
   const { width } = useWindowDimensions();
+  const standing = useBoardStanding(userId);
 
   const [profile, setProfile] = useState<PublicProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -61,7 +71,7 @@ export function PublicProfileScreen({ navigation, route }: Props) {
     void fetchProfile();
   }, [fetchProfile]);
 
-  const cardWidth = useMemo(
+  const tileWidth = useMemo(
     () => (width - layout.gutter * 2 - layout.gridGap) / 2,
     [width]
   );
@@ -113,34 +123,37 @@ export function PublicProfileScreen({ navigation, route }: Props) {
           chevron from ScreenHeader. */}
       <BackButton style={styles.back} />
 
-      <View style={styles.head}>
-        <Avatar uri={profile.user.avatarUrl} name={profile.user.username} size={72} />
+      <View style={profileStyles.head}>
+        <Avatar uri={profile.user.avatarUrl} name={profile.user.username} size={64} />
 
-        <View style={styles.headBody}>
-          <Text style={[text.h1, { color: paper.text }]} numberOfLines={1}>
+        <View style={profileStyles.headBody}>
+          <Text style={[text.h2, { color: paper.text }]} numberOfLines={1}>
             {profile.user.username}
           </Text>
-          <Text style={[text.bodySm, { color: paper.textMuted }]}>
-            {`Joined ${relativeTime(profile.user.createdAt)}`}
-          </Text>
+
+          <RankPill rank={profile.user.photographerRank} />
+
           {profile.user.proSubscriptionActive ? (
             <Badge label="Pro" tone="accent" style={styles.proBadge} />
           ) : null}
         </View>
       </View>
 
-      <View style={styles.rank}>
-        <RankChip rank={profile.user.photographerRank} />
-      </View>
+      {/*
+        The same rail, with the one figure that cannot be public swapped out. Reactions
+        received is a number about how the crowd treats *you*; on a stranger's profile the
+        equivalent question is what they have won, so challenge wins takes the slot.
+      */}
+      <StatRail
+        stats={[
+          { label: 'Photos', value: profile.totalPhotos },
+          { label: 'Cats found', value: profile.catsDiscovered },
+          { label: 'Best score', value: profile.bestScore },
+          { label: 'Challenge wins', value: profile.challengeWins },
+        ]}
+      />
 
-      {/* Stats as negative space and mono numerals — no boxes. Four numbers do not need
-          four cards. */}
-      <View style={styles.stats}>
-        <StatHeadline label="Photos" value={profile.totalPhotos} />
-        <StatHeadline label="Cats found" value={profile.catsDiscovered} />
-        <StatHeadline label="Best shot" value={profile.bestScore} />
-        <StatHeadline label="Challenge wins" value={profile.challengeWins} />
-      </View>
+      {standing ? <BoardTrophy entry={standing} label="On the board" /> : null}
 
       <SectionHeader
         title="Showcase"
@@ -152,38 +165,90 @@ export function PublicProfileScreen({ navigation, route }: Props) {
           <Text style={[text.body, { color: paper.textMuted }]}>Nothing on show yet.</Text>
         </Card>
       ) : (
-        <View style={styles.grid}>
-          {profile.showcasePhotos.map((photo, index) => (
-            <PhotoCard
-              key={photo.id}
-              photo={photo}
-              index={index}
-              // A stranger's photo has no detail screen to open — the album it lives in
-              // is private, so tapping does nothing here.
-              onPress={() => undefined}
-              style={{ width: cardWidth }}
-            />
+        <View style={profileStyles.showcase}>
+          {profile.showcasePhotos.slice(0, SHOWCASE_LIMIT).map((photo) => (
+            <ShowcaseTile key={photo.id} photo={photo} width={tileWidth} />
           ))}
         </View>
       )}
+
+      {/*
+        The shape of their album, not its contents. A stranger cannot browse somebody
+        else's photographs — the rows are never sent — but how much they have shot and how
+        it fell across the tiers is public the same way the stat rail is.
+
+        Always rendered, including at zero. Hiding the section when nothing is shared made
+        an empty profile and a broken one look identical, which is not a distinction to
+        leave to the reader.
+      */}
+      <SectionHeader
+        title="Album breakdown"
+        description={
+          profile.totalPhotos > 0
+            ? pluralize(profile.totalPhotos, 'shared photo')
+            : 'Nothing shared yet.'
+        }
+      />
+
+      <Card>
+        <DividedGroup>
+          {RARITIES.map((tier) => {
+            // `?? 0` guards a server that predates `tierCounts`: a missing field should
+            // draw an empty bar, not take the screen down with it.
+            const count = profile.tierCounts?.[tier] ?? 0;
+
+            return (
+              <View key={tier} style={styles.tierRow}>
+                <RarityBadge rarity={tier} />
+                <View style={styles.tierBarTrack}>
+                  <View
+                    style={[
+                      styles.tierBarFill,
+                      {
+                        width: `${
+                          profile.totalPhotos > 0
+                            ? (count / profile.totalPhotos) * 100
+                            : 0
+                        }%`,
+                      },
+                    ]}
+                  />
+                </View>
+                <Text style={[text.stat, styles.tierCount]}>{count}</Text>
+              </View>
+            );
+          })}
+        </DividedGroup>
+      </Card>
+
+      {/* Rank is the one progression bar in the app, and it buys cosmetics only — the same
+          card your own profile carries, minus the XP-to-next line, which is yours alone. */}
+      <SectionHeader
+        title="Progress"
+        description="Rank unlocks filters and frames. It never buys a scoring advantage."
+      />
+
+      <Card>
+        <View style={styles.rankRow}>
+          <Text style={[text.h3, { color: paper.text }]}>
+            {rankTitle(profile.user.photographerRank)}
+          </Text>
+          <Text style={[text.stat, { color: paper.textMuted }]}>
+            {compactNumber(profile.user.photographerXp)}
+          </Text>
+        </View>
+
+        <MeterBar
+          ratio={rankProgress(profile.user.photographerXp, profile.user.photographerRank)}
+        />
+      </Card>
+
+      <Text style={[text.caption, styles.joined]}>
+        {`Joined ${relativeTime(profile.user.createdAt)}`}
+      </Text>
     </Screen>
   );
 }
-
-const StatHeadline = React.memo(function StatHeadline({
-  label,
-  value,
-}: {
-  label: string;
-  value: number;
-}) {
-  return (
-    <View style={styles.stat}>
-      <Text style={[text.statLg, { color: paper.text }]}>{compactNumber(value)}</Text>
-      <Text style={[text.caption, { color: paper.textMuted }]}>{label}</Text>
-    </View>
-  );
-});
 
 const styles = StyleSheet.create({
   banner: {
@@ -195,33 +260,40 @@ const styles = StyleSheet.create({
   back: {
     marginBottom: spacing.xs,
   },
-  head: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-  },
-  headBody: {
-    flex: 1,
-    gap: 2,
-  },
   proBadge: {
     marginTop: spacing.xxs,
   },
-  rank: {
-    marginTop: spacing.md,
-  },
-  stats: {
+  rankRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.xl,
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    marginBottom: spacing.sm,
+  },
+  joined: {
     marginTop: spacing.lg,
+    color: paper.textFaint,
   },
-  stat: {
-    gap: 1,
-  },
-  grid: {
+  tierRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: layout.gridGap,
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  tierBarTrack: {
+    flex: 1,
+    height: 6,
+    borderRadius: radii.full,
+    backgroundColor: paper.sunken,
+    overflow: 'hidden',
+  },
+  tierBarFill: {
+    height: '100%',
+    borderRadius: radii.full,
+    backgroundColor: marmalade[600],
+  },
+  tierCount: {
+    minWidth: 28,
+    textAlign: 'right',
+    color: paper.textMuted,
   },
 });

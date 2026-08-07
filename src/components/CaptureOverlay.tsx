@@ -10,7 +10,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import Svg, { Circle } from 'react-native-svg';
 import { BlurView } from 'expo-blur';
-import { Cat, PaperPlaneTilt, X } from 'phosphor-react-native';
+import { Cat, X } from 'phosphor-react-native';
 
 import type { CapturePhase, DetectionBox } from '../store/captureStore';
 import { CircleButton } from './CircleButton';
@@ -58,9 +58,6 @@ export interface CaptureOverlayProps {
   framesRequired: number;
   onShutter: () => void;
   onClose: () => void;
-  /** Sharing default comes from the player's settings; toggling here is per-shot. */
-  shareToFeed: boolean;
-  onToggleShare: () => void;
 }
 
 export const CaptureOverlay = React.memo(function CaptureOverlay({
@@ -72,8 +69,6 @@ export const CaptureOverlay = React.memo(function CaptureOverlay({
   framesRequired,
   onShutter,
   onClose,
-  shareToFeed,
-  onToggleShare,
 }: CaptureOverlayProps) {
   const busy = phase === 'capturing' || phase === 'scoring';
   const seconds = Math.ceil(remainingMs / 1000);
@@ -82,24 +77,20 @@ export const CaptureOverlay = React.memo(function CaptureOverlay({
     <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
       {box ? <DetectionFrame box={box} locked={phase === 'framing'} /> : null}
 
+      {/*
+        One control up here, and it is the way out.
+
+        There used to be a share toggle in the opposite corner, set before the shot — which
+        asked the player to decide whether a photo was worth publishing before they had
+        seen it, or knew what it scored. That decision belongs on the reveal, where the
+        photo is in front of them, and it is on the reveal now. Two buttons over a live
+        viewfinder for one job was one too many.
+      */}
       <View style={styles.top} pointerEvents="box-none">
         <CircleButton
           Glyph={X}
           onPress={onClose}
           accessibilityLabel="Close the camera"
-        />
-
-        {/*
-          The design's slot for a flash toggle. This app has no flash — a startled cat is
-          a worse photo than a dark one — so the slot carries the control that actually
-          changes what this shot does: whether it goes to the feed.
-        */}
-        <CircleButton
-          Glyph={PaperPlaneTilt}
-          onPress={onToggleShare}
-          accessibilityLabel="Share this shot to the community feed"
-          glyphSize={17}
-          style={shareToFeed ? styles.shareOn : undefined}
         />
       </View>
 
@@ -134,7 +125,6 @@ export const CaptureOverlay = React.memo(function CaptureOverlay({
           label={phase === 'framing' ? 'Auto capture' : 'Tap to shoot'}
           active={phase === 'framing'}
         />
-        {shareToFeed ? <ModePill label="Sharing to feed" /> : null}
       </View>
     </View>
   );
@@ -375,12 +365,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-  },
-  shareOn: {
-    // The one place a control's *state* is worth the accent on this screen.
-    borderRadius: radii.full,
-    borderWidth: 2,
-    borderColor: marmalade[600],
   },
   centre: {
     ...StyleSheet.absoluteFillObject,

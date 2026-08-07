@@ -27,6 +27,7 @@ import {
   type ContextName,
 } from '../theme';
 import { Grain } from './Grain';
+import { PawRefreshIndicator } from './PawRefresh';
 
 /**
  * Screen shell.
@@ -51,6 +52,8 @@ export function Screen({
   bleed = false,
   grain,
   refreshControl,
+  refreshing = false,
+  refreshIndicatorOffset,
   contentStyle,
   style,
 }: {
@@ -88,6 +91,22 @@ export function Screen({
    * the props type is both the fix and more honest about what belongs here.
    */
   refreshControl?: React.ReactElement<RefreshControlProps>;
+  /**
+   * Whether a pull-to-refresh is running.
+   *
+   * Paired with `pawRefreshControl`, which hides the platform spinner: this is what puts
+   * the paws in the space it leaves behind. The flag lives here rather than inside the
+   * control because the indicator has to be a sibling of the scroller, not a child of it.
+   */
+  refreshing?: boolean;
+  /**
+   * How far below the safe area those paws sit.
+   *
+   * Defaults to a hair, which is where the gap opens on a screen whose header scrolls with
+   * its content. A screen with a *fixed* header above its list opens the gap below that
+   * header instead, and passes its height here.
+   */
+  refreshIndicatorOffset?: number;
   contentStyle?: StyleProp<ViewStyle>;
   style?: StyleProp<ViewStyle>;
 }) {
@@ -103,11 +122,19 @@ export function Screen({
         paddingBottom: clearTabBar ? layout.tabBarClearance : insets.bottom,
       };
 
+  const indicator = (
+    <PawRefreshIndicator
+      refreshing={refreshing}
+      top={insets.top + (refreshIndicatorOffset ?? spacing.xs)}
+    />
+  );
+
   if (scroll) {
     return (
       <View style={[styles.root, { backgroundColor: c.bg }, style]}>
         <StatusBar style={context === 'arena' ? 'light' : 'dark'} />
         {showGrain ? <Grain context={context} /> : null}
+        {indicator}
         <ScrollView
           contentContainerStyle={[padding, contentStyle]}
           keyboardShouldPersistTaps="handled"
@@ -124,6 +151,7 @@ export function Screen({
     <View style={[styles.root, { backgroundColor: c.bg }, style]}>
       <StatusBar style={context === 'arena' ? 'light' : 'dark'} />
       {showGrain ? <Grain context={context} /> : null}
+      {indicator}
       <View style={[styles.root, padding]}>{children}</View>
     </View>
   );
@@ -136,6 +164,11 @@ export function Screen({
  * has a title, and at 20pt they competed with it. The optional glyph is what carries the
  * emphasis instead — a small accent mark beside 15pt bold reads louder than 20pt plain,
  * and costs no vertical space.
+ *
+ * `size="lg"` is the exception, for a screen with **no title of its own** — the feed opens
+ * on a wordmark, so "Trending now" and "For you" are the only headings on it and there is
+ * nothing above them left to compete with. They are the screen's structure rather than a
+ * label inside it, so they run at display size.
  */
 export const SectionHeader = React.memo(function SectionHeader({
   title,
@@ -143,6 +176,7 @@ export const SectionHeader = React.memo(function SectionHeader({
   Glyph,
   glyphColor,
   action,
+  size = 'md',
   context = 'paper',
   style,
 }: {
@@ -151,24 +185,41 @@ export const SectionHeader = React.memo(function SectionHeader({
   Glyph?: React.ComponentType<IconProps>;
   glyphColor?: string;
   action?: React.ReactNode;
+  /** `lg` is for screens with no `ScreenHeader` above them. See the note above. */
+  size?: 'md' | 'lg';
   context?: ContextName;
   style?: StyleProp<ViewStyle>;
 }) {
   const c = contextColors(context);
+  const large = size === 'lg';
 
   return (
     <View style={[styles.section, style]}>
       <View style={styles.sectionRow}>
         <View style={styles.sectionTitleRow}>
           {Glyph ? (
-            <Glyph size={15} weight="fill" color={glyphColor ?? marmalade[600]} />
+            <Glyph
+              size={large ? 22 : 15}
+              weight="fill"
+              color={glyphColor ?? marmalade[600]}
+            />
           ) : null}
-          <Text style={[text.h3, styles.sectionTitle, { color: c.text }]}>{title}</Text>
+          <Text
+            style={[large ? text.h1 : text.h3, styles.sectionTitle, { color: c.text }]}
+          >
+            {title}
+          </Text>
         </View>
         {action}
       </View>
       {description ? (
-        <Text style={[text.bodySm, styles.sectionBody, { color: c.textMuted }]}>
+        <Text
+          style={[
+            large ? text.body : text.bodySm,
+            styles.sectionBody,
+            { color: c.textMuted },
+          ]}
+        >
           {description}
         </Text>
       ) : null}

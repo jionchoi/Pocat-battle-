@@ -1,28 +1,34 @@
 import React, { useEffect, useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Image } from 'expo-image';
-import { CaretRight, CheckCircle, Circle, Crown, Gear } from 'phosphor-react-native';
+import { CaretRight, Gear } from 'phosphor-react-native';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import type { CompositeScreenProps } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { Avatar } from '../../components/Avatar';
-import { Badge, RarityBadge, ScoreChip } from '../../components/Badge';
+import { Badge, RarityBadge } from '../../components/Badge';
 import { Button } from '../../components/Button';
 import { Card, DividedGroup } from '../../components/Card';
 import { CircleButton } from '../../components/CircleButton';
 import { MeterBar } from '../../components/ProgressBar';
+import {
+  BoardTrophy,
+  profileStyles,
+  RankPill,
+  ShowcaseTile,
+  StatRail,
+  SHOWCASE_LIMIT,
+} from '../../components/ProfileParts';
 import { Screen, SectionHeader } from '../../components/Screen';
 import { RARITIES, rankProgress, rankTitle } from '../../constants/game';
 import type { Photo, Rarity } from '../../models';
+import { useBoardStanding } from '../../hooks/useBoardStanding';
 import { useAlbumStore } from '../../store/albumStore';
 import { useAuthStore } from '../../store/authStore';
-import { paper, marmalade, icon, layout, radii, spacing, text } from '../../theme';
+import { paper, marmalade, layout, radii, spacing, text } from '../../theme';
 import type { MainTabParamList, ProfileStackParamList } from '../../navigation/types';
 import { compactNumber, pluralize, relativeTime } from '../../utils/format';
-
-/** Two across, and six is the cap the showcase toggle already enforces on Photo Detail. */
-const SHOWCASE_LIMIT = 6;
 
 /**
  * Profile (README section 5.5).
@@ -43,6 +49,7 @@ export function ProfileScreen({ navigation }: Props) {
 
   const user = useAuthStore((s) => s.user);
   const refreshUser = useAuthStore((s) => s.refreshUser);
+  const standing = useBoardStanding();
 
   const photos = useAlbumStore((s) => s.photos);
   const cats = useAlbumStore((s) => s.cats);
@@ -116,7 +123,7 @@ export function ProfileScreen({ navigation }: Props) {
   }, [photos]);
 
   const openAlbum = () =>
-    navigation.navigate('AlbumTab', { screen: 'PhotoAlbumGrid' });
+    navigation.navigate('PhotoAlbumGrid');
 
   // Reachable for a beat between hydrate and the first `me` response. Deliberately blank
   // rather than a skeleton: it is one frame in practice, and a skeleton that flashes for
@@ -152,22 +159,17 @@ export function ProfileScreen({ navigation }: Props) {
         />
       </View>
 
-      <View style={styles.head}>
+      <View style={profileStyles.head}>
         <Avatar uri={user.avatarUrl} name={user.username} size={64} />
 
-        <View style={styles.headBody}>
+        <View style={profileStyles.headBody}>
           <Text style={[text.h2, { color: paper.text }]} numberOfLines={1}>
             {user.username}
           </Text>
 
           {/* Rank is the player's title, so it rides right under the name rather than
               waiting in a card further down. */}
-          <View style={styles.rankPill}>
-            <Crown size={11} weight="fill" color={marmalade[600]} />
-            <Text style={[text.caption, styles.rankPillText]} numberOfLines={1}>
-              {`Rank ${user.photographerRank} · ${rankTitle(user.photographerRank)}`}
-            </Text>
-          </View>
+          <RankPill rank={user.photographerRank} />
 
           {user.proSubscriptionActive ? (
             <Badge label="Pro" tone="accent" style={styles.proBadge} />
@@ -175,17 +177,36 @@ export function ProfileScreen({ navigation }: Props) {
         </View>
       </View>
 
+      <StatRail
+        stats={[
+          { label: 'Photos', value: user.photoCount },
+          { label: 'Cats spotted', value: cats.length },
+          { label: 'Best score', value: best?.scores.total ?? 0 },
+          { label: 'Reactions', value: user.votesReceived },
+        ]}
+      />
+
       {/*
-        Four figures on one rule. Hairlines above and below and between, no card: these
-        are a masthead for the screen, and boxing them would make them look like one more
-        section competing with the ones that follow.
+        Your own photograph on the board, if it made the top ten. Between the rail and the
+        showcase: the rail is what you are, the showcase is what you chose to show, and
+        this is neither — it is where the neighbourhood put you.
       */}
-      <View style={styles.statRail}>
-        <RailStat label="Photos" value={user.photoCount} />
-        <RailStat label="Cats spotted" value={cats.length} divided />
-        <RailStat label="Best score" value={best?.scores.total ?? 0} divided />
-        <RailStat label="Reactions" value={user.votesReceived} divided />
-      </View>
+      {standing ? <BoardTrophy entry={standing} label="Your best score" /> : null}
+
+      {/*
+        The shop sits directly under the rail rather than at the foot of the screen.
+        Buried below the album breakdown it was the last thing on a long scroll, which is
+        where you put something nobody is meant to find. Here it reads as one more thing
+        the figures above lead to, and it is still quiet enough — a secondary button, not
+        a banner — that it does not shout over the photographs beneath it.
+      */}
+      <Button
+        label="Open the shop"
+        variant="secondary"
+        fullWidth
+        onPress={() => navigation.navigate('Shop')}
+        style={styles.shopAction}
+      />
 
       {/*
         The album lives here now. It gave up its slot in the tab bar to the capture
@@ -207,17 +228,14 @@ export function ProfileScreen({ navigation }: Props) {
       />
 
       {showcase.length > 0 ? (
-        <View style={styles.showcase}>
+        <View style={profileStyles.showcase}>
           {showcase.map((photo) => (
             <ShowcaseTile
               key={photo.id}
               photo={photo}
               width={showcaseTileWidth}
               onPress={() =>
-                navigation.navigate('AlbumTab', {
-                  screen: 'PhotoDetail',
-                  params: { photoId: photo.id },
-                })
+                navigation.navigate('PhotoDetail', { photoId: photo.id })
               }
             />
           ))}
@@ -241,7 +259,7 @@ export function ProfileScreen({ navigation }: Props) {
           detail={`${pluralize(cats.length, 'cat')}${
             discovered > 0 ? ` · ${discovered} you found first` : ''
           }`}
-          onPress={() => navigation.navigate('AlbumTab', { screen: 'CatDex' })}
+          onPress={() => navigation.navigate('CatDex')}
         />
       </View>
 
@@ -328,81 +346,14 @@ export function ProfileScreen({ navigation }: Props) {
         </DividedGroup>
       </Card>
 
-      <SectionHeader
-        title="Milestones"
-        description="Earned from what you have actually done."
-      />
-
-      <Card>
-        <DividedGroup>
-          <Milestone
-            label="First shot"
-            achieved={photos.length >= 1}
-            detail="Photograph a cat."
-          />
-          <Milestone
-            label="Ten in the album"
-            achieved={photos.length >= 10}
-            detail={`${Math.min(photos.length, 10)} of 10 photos.`}
-          />
-          <Milestone
-            label="Rare moment"
-            achieved={byTier.Epic + byTier.Legendary > 0}
-            detail="Score an Epic or Legendary shot."
-          />
-          <Milestone
-            label="Regular"
-            achieved={cats.some((cat) => cat.encounterCount >= 5)}
-            detail="Photograph the same cat five times."
-          />
-          <Milestone
-            label="Discoverer"
-            achieved={discovered >= 1}
-            detail="Be the first to photograph a cat."
-          />
-          <Milestone
-            label="Well received"
-            achieved={user.votesReceived >= 25}
-            detail={`${Math.min(user.votesReceived, 25)} of 25 reactions received.`}
-          />
-        </DividedGroup>
-      </Card>
-
-      <Button
-        label="Open the shop"
-        variant="secondary"
-        fullWidth
-        onPress={() => navigation.navigate('Shop')}
-        style={styles.shopAction}
-      />
+      {/*
+        Milestones used to close this screen. They live on the Challenges hub now: they are
+        instructions for what to go and shoot next, and that is the tab a player opens to
+        be told what to do — not the one they open to look at what they have already done.
+      */}
     </Screen>
   );
 }
-
-/**
- * One figure in the masthead rail.
- *
- * The divider is a border on the cell rather than a separate element, so the four cells
- * stay a single flex row that divides the width evenly however many of them there are.
- */
-const RailStat = React.memo(function RailStat({
-  label,
-  value,
-  divided = false,
-}: {
-  label: string;
-  value: number;
-  divided?: boolean;
-}) {
-  return (
-    <View style={[styles.railCell, divided && styles.railDivider]}>
-      <Text style={[text.statMd, { color: paper.text }]}>{compactNumber(value)}</Text>
-      <Text style={[text.captionSm, styles.railLabel]} numberOfLines={1}>
-        {label}
-      </Text>
-    </View>
-  );
-});
 
 /**
  * A row that goes somewhere. Hairline-separated inside `DividedGroup`, no box — these are
@@ -436,77 +387,6 @@ const NavRow = React.memo(function NavRow({
   );
 });
 
-/**
- * A showcase cell: the photo, its score top-left, its tier top-right.
- *
- * Same corner grammar as every other photo surface in the product — score on the left,
- * tier on the right — so a player who has learned to read a feed card can read this
- * without being taught twice.
- */
-const ShowcaseTile = React.memo(function ShowcaseTile({
-  photo,
-  width,
-  onPress,
-}: {
-  photo: Photo;
-  /**
-   * Measured, not a percentage. A wrapping flex row with a `gap` cannot hold two 50%
-   * children — the gap pushes the second onto its own line — so the width is computed
-   * from the window once and handed down.
-   */
-  width: number;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={`${photo.catNickname}, scored ${photo.scores.total}, ${photo.tier}`}
-      style={[styles.showcaseTile, { width }]}
-    >
-      <Image
-        source={photo.imageUrl || undefined}
-        contentFit="cover"
-        transition={200}
-        style={StyleSheet.absoluteFill}
-        accessible={false}
-      />
-      <View style={styles.showcaseCorners} pointerEvents="none">
-        <ScoreChip score={photo.scores.total} />
-        <RarityBadge rarity={photo.tier} size="sm" compact />
-      </View>
-    </Pressable>
-  );
-});
-
-const Milestone = React.memo(function Milestone({
-  label,
-  detail,
-  achieved,
-}: {
-  label: string;
-  detail: string;
-  achieved: boolean;
-}) {
-  const Glyph = achieved ? CheckCircle : Circle;
-
-  return (
-    <View style={styles.milestone}>
-      <Glyph
-        size={icon.size.md}
-        color={achieved ? marmalade[600] : paper.textFaint}
-        weight={achieved ? icon.weightActive : icon.weightDefault}
-      />
-      <View style={styles.milestoneBody}>
-        <Text style={[text.body, { color: achieved ? paper.text : paper.textMuted }]}>
-          {label}
-        </Text>
-        <Text style={[text.caption, { color: paper.textFaint }]}>{detail}</Text>
-      </View>
-    </View>
-  );
-});
-
 const styles = StyleSheet.create({
   topBar: {
     flexDirection: 'row',
@@ -514,56 +394,8 @@ const styles = StyleSheet.create({
     paddingTop: spacing.xs,
     paddingBottom: spacing.sm,
   },
-  head: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm + 2,
-  },
-  headBody: {
-    flex: 1,
-    gap: 6,
-  },
-  rankPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    alignSelf: 'flex-start',
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    borderRadius: radii.full,
-    backgroundColor: marmalade[100],
-  },
-  rankPillText: {
-    color: marmalade[600],
-    flexShrink: 1,
-  },
   proBadge: {
     marginTop: spacing.xxs,
-  },
-  statRail: {
-    flexDirection: 'row',
-    marginTop: spacing.lg,
-    paddingVertical: spacing.sm + 2,
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: paper.hairline,
-  },
-  railCell: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 4,
-  },
-  railDivider: {
-    borderLeftWidth: 1,
-    borderLeftColor: paper.hairline,
-  },
-  railLabel: {
-    color: paper.textSubtle,
-  },
-  showcase: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: layout.gridGap,
   },
   showcaseTile: {
     aspectRatio: 4 / 5,
@@ -588,15 +420,6 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 2,
   },
-  showcaseCorners: {
-    position: 'absolute',
-    top: 7,
-    left: 7,
-    right: 7,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-  },
   rankRow: {
     flexDirection: 'row',
     alignItems: 'baseline',
@@ -607,7 +430,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   shopAction: {
-    marginTop: spacing.xl,
+    marginTop: spacing.lg,
   },
   quota: {
     marginTop: spacing.lg,
@@ -641,16 +464,6 @@ const styles = StyleSheet.create({
     minWidth: 28,
     textAlign: 'right',
     color: paper.textMuted,
-  },
-  milestone: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    paddingVertical: spacing.sm,
-  },
-  milestoneBody: {
-    flex: 1,
-    gap: 1,
   },
   bestRow: {
     flexDirection: 'row',
