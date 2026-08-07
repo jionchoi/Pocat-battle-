@@ -243,8 +243,8 @@ export function CaptureScreen() {
         <Text style={[text.h2, styles.gateTitle]}>Camera access is needed</Text>
         <Text style={[text.body, styles.gateBody]}>
           {cameraPermission.blocked
-            ? 'Camera access is turned off for CatSnap. You can turn it back on in your device settings.'
-            : 'CatSnap uses the camera to spot cats and score your photos. Nothing is uploaded until you take a shot.'}
+            ? 'Camera access is turned off for Cat Frame. You can turn it back on in your device settings.'
+            : 'Cat Frame uses the camera to spot cats and score your photos. Nothing is uploaded until you take a shot.'}
         </Text>
 
         <View style={styles.gateActions}>

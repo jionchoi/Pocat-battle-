@@ -67,7 +67,7 @@ export function SplashScreen() {
       </Animated.View>
 
       <Animated.View style={wordStyle}>
-        <Text style={[text.display, styles.title]}>CatSnap</Text>
+        <Text style={[text.display, styles.title]}>Cat Frame</Text>
         <Text style={[text.bodySm, styles.tagline]}>
           Find the cats on your own street
         </Text>

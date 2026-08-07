@@ -167,7 +167,7 @@ export function MapScreen({ navigation }: Props) {
       <View style={[styles.root, { paddingTop: insets.top }]}>
         <EmptyState
           title="Location is switched off"
-          body="CatSnap needs location to show cat sightings near you, and to score the photos you take. You can turn it back on in your device settings."
+          body="Cat Frame needs location to show cat sightings near you, and to score the photos you take. You can turn it back on in your device settings."
           Glyph={Crosshair}
         />
       </View>

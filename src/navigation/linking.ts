@@ -14,7 +14,7 @@ import type { RootStackParamList } from './types';
  * live camera state or the scored result those screens exist to display.
  */
 export const linking: LinkingOptions<RootStackParamList> = {
-  prefixes: [Linking.createURL('/'), 'catsnap://', 'https://catsnap.app'],
+  prefixes: [Linking.createURL('/'), 'catframe://', 'https://catframe.app'],
 
   config: {
     screens: {

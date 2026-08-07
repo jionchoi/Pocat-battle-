@@ -1,10 +1,10 @@
-# CatSnap — Design System v2
+# Cat Frame — Design System v2
 
 This document **replaces Section 4 of the build brief** and amends Sections 5–7 where the
 original design language conflicted with the project's design standards.
 
 Platform reality check: the design skills in `.claude/skills/` are written for web
-(Tailwind utilities, `100dvh`, `backdrop-blur`, CSS Grid). CatSnap is React Native + Expo.
+(Tailwind utilities, `100dvh`, `backdrop-blur`, CSS Grid). Cat Frame is React Native + Expo.
 Every rule below is the **principle** from those skills, ported to a mechanism that
 actually exists on RN. Where a rule has no RN equivalent, that is stated rather than
 faked.
@@ -27,7 +27,7 @@ reveal.
 
 ### The two contexts
 
-CatSnap has a light chrome and a dark immersive mode. This is **not** the banned
+Cat Frame has a light chrome and a dark immersive mode. This is **not** the banned
 "random dark section in a light page" — those are committed full-screen mode switches
 with their own token set, entered and exited deliberately.
 

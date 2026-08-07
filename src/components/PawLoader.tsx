@@ -19,7 +19,7 @@ import { icon, useReduceMotion } from '../theme';
  *
  * `ActivityIndicator` is the one piece of chrome in this app that came from the platform
  * rather than from us — a grey system spinner in the middle of a coral button belongs to
- * iOS, not to CatSnap. This is the replacement, and it is the same paw as the shutter
+ * iOS, not to Cat Frame. This is the replacement, and it is the same paw as the shutter
  * glyph, which is what ties "waiting" to "photographing a cat" rather than to "loading".
  *
  * ## The motion

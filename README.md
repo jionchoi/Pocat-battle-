@@ -1,5 +1,5 @@
-# CatSnap — Real Cat Photography & Scoring App
-*(working title — swap in your final name once picked; "CatSnap"/"Whisker Watch"/etc. were shortlisted earlier)*
+# Cat Frame — Real Cat Photography & Scoring App
+*(working title — swap in your final name once picked; "Cat Frame"/"Whisker Watch"/etc. were shortlisted earlier)*
 
 > Explore your real neighborhood, spot real cats, and race to catch them mid-moment with your camera before they dart off. Every candid, funny, or perfectly-timed shot gets scored, collected into your personal cat album, and is built to be shared. No battling, no combat engine — the game IS the shot.
 
@@ -428,4 +428,4 @@ Phase 3 - Post-launch (needs city-level user density)
 - Pose/action classification approach: off-the-shelf model vs. custom-trained, and its real-world accuracy on cats specifically (needs testing)
 - Exact choice between Google Cloud Vision vs. AWS Rekognition for server-side scoring signals (pricing/accuracy comparison needed)
 - Prisma vs. Drizzle for the ORM layer
-- Final app name (see earlier naming brainstorm - "CatSnap" here is a placeholder)
+- Final app name (see earlier naming brainstorm - "Cat Frame" here is a placeholder)

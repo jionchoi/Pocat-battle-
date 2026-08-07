@@ -1,5 +1,5 @@
 /**
- * CatSnap color tokens.
+ * Cat Frame color tokens.
  *
  * The identity is a photo app that keeps score: an unlit neutral chrome so the cat
  * photograph is the only saturated thing on the screen, and one hot coral that marks

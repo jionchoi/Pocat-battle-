@@ -29,7 +29,7 @@ import type { Reaction } from '../models';
  * rather than a way to react twice.
  */
 
-const STORAGE_KEY = 'catsnap.reactions.v1';
+const STORAGE_KEY = 'catframe.reactions.v1';
 
 /** Bounded so a heavy scroller's history cannot grow without limit. */
 const MAX_TRACKED = 4_000;

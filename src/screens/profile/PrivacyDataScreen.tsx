@@ -159,7 +159,7 @@ export function PrivacyDataScreen() {
       </Card>
 
       <Text style={[text.caption, styles.footnote]}>
-        You can also email support@catsnap.app to request a copy of your data.
+        You can also email support@catframe.app to request a copy of your data.
       </Text>
 
       <ConfirmSheet

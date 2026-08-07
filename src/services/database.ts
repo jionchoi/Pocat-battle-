@@ -19,7 +19,7 @@ let database: SQLite.SQLiteDatabase | null = null;
 async function db(): Promise<SQLite.SQLiteDatabase> {
   if (database) return database;
 
-  database = await SQLite.openDatabaseAsync('catsnap.db');
+  database = await SQLite.openDatabaseAsync('catframe.db');
 
   await database.execAsync(`
     PRAGMA journal_mode = WAL;

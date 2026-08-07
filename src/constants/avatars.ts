@@ -2,13 +2,13 @@
  * The built-in avatar set.
  *
  * Avatars are a fixed catalogue rather than an image upload, so an account's avatar is
- * stored as `catsnap://avatar/<id>` — an identity, not a file. Nothing fetches these:
+ * stored as `catframe://avatar/<id>` — an identity, not a file. Nothing fetches these:
  * `resolveAvatar` turns the URL back into a swatch the client draws itself. Anything that
  * renders a user avatar must go through here before touching an `<Image>`, because the
- * native image loader has no handler for the `catsnap:` scheme and throws on one.
+ * native image loader has no handler for the `catframe:` scheme and throws on one.
  */
 
-export const AVATAR_SCHEME_PREFIX = 'catsnap://avatar/';
+export const AVATAR_SCHEME_PREFIX = 'catframe://avatar/';
 
 export type AvatarSwatch = {
   id: string;

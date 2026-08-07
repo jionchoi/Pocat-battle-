@@ -65,7 +65,7 @@ export function SettingsScreen({ navigation }: Props) {
         const current = await Notifications.getPermissionsAsync();
 
         if (!current.granted && !current.canAskAgain) {
-          showToast('Turn notifications on for CatSnap in system settings', 'neutral');
+          showToast('Turn notifications on for Cat Frame in system settings', 'neutral');
           await Linking.openSettings();
           return;
         }
@@ -148,7 +148,7 @@ export function SettingsScreen({ navigation }: Props) {
       <Card>
         <DividedGroup>
           <Row
-            label="CatSnap Pro"
+            label="Cat Frame Pro"
             detail={
               user?.proSubscriptionActive
                 ? 'Active. Manage it in your store account.'
@@ -184,10 +184,10 @@ export function SettingsScreen({ navigation }: Props) {
         <DividedGroup>
           <Row
             label="Contact us"
-            detail="support@catsnap.app"
+            detail="support@catframe.app"
             onPress={() =>
               void Linking.openURL(
-                'mailto:support@catsnap.app?subject=CatSnap%20support'
+                'mailto:support@catframe.app?subject=Cat%20Frame%20support'
               )
             }
           />

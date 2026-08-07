@@ -1,10 +1,10 @@
 {
   "expo": {
-    "name": "CatSnap",
-    "slug": "catsnap",
+    "name": "Cat Frame",
+    "slug": "cat-frame",
     "version": "0.1.0",
     "orientation": "portrait",
-    "scheme": "catsnap",
+    "scheme": "catframe",
     "userInterfaceStyle": "light",
     "splash": {
       "resizeMode": "contain",
@@ -15,18 +15,18 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "app.catsnap.client",
+      "bundleIdentifier": "app.catframe.client",
       "config": {
         "usesNonExemptEncryption": false
       },
       "infoPlist": {
-        "NSCameraUsageDescription": "CatSnap uses your camera to spot cats and score the photos you take of them.",
-        "NSLocationWhenInUseUsageDescription": "CatSnap uses your location to show cat sightings nearby and to recognise the same cat on a later encounter.",
-        "NSPhotoLibraryAddUsageDescription": "CatSnap can save a photo you took to your library."
+        "NSCameraUsageDescription": "Cat Frame uses your camera to spot cats and score the photos you take of them.",
+        "NSLocationWhenInUseUsageDescription": "Cat Frame uses your location to show cat sightings nearby and to recognise the same cat on a later encounter.",
+        "NSPhotoLibraryAddUsageDescription": "Cat Frame can save a photo you took to your library."
       }
     },
     "android": {
-      "package": "app.catsnap.client",
+      "package": "app.catframe.client",
       "permissions": [
         "CAMERA",
         "ACCESS_FINE_LOCATION",
@@ -49,20 +49,20 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "CatSnap uses your camera to spot cats and score the photos you take of them."
+          "cameraPermission": "Cat Frame uses your camera to spot cats and score the photos you take of them."
         }
       ],
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "CatSnap uses your location to show cat sightings nearby and to recognise the same cat on a later encounter."
+          "locationWhenInUsePermission": "Cat Frame uses your location to show cat sightings nearby and to recognise the same cat on a later encounter."
         }
       ],
       [
         "expo-media-library",
         {
-          "savePhotosPermission": "CatSnap saves the photos you took to your library when you ask it to.",
-          "photosPermission": "CatSnap saves the photos you took to your library when you ask it to.",
+          "savePhotosPermission": "Cat Frame saves the photos you took to your library when you ask it to.",
+          "photosPermission": "Cat Frame saves the photos you took to your library when you ask it to.",
           "isAccessMediaLocationEnabled": false
         }
       ]

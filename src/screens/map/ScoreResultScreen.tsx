@@ -246,7 +246,7 @@ export function ScoreResultScreen() {
       const permission = await MediaLibrary.requestPermissionsAsync(true);
 
       if (!permission.granted) {
-        showToast('CatSnap needs permission to add photos to your library.', 'error');
+        showToast('Cat Frame needs permission to add photos to your library.', 'error');
         return;
       }
 

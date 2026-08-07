@@ -1,4 +1,4 @@
-# Testing CatSnap by hand
+# Testing Cat Frame by hand
 
 ## Start it
 

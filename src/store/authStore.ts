@@ -12,8 +12,8 @@ import type { Me } from '../models';
  * Android — never in AsyncStorage or MMKV, which are plain files on disk.
  */
 
-const ACCESS_KEY = 'catsnap.accessToken';
-const REFRESH_KEY = 'catsnap.refreshToken';
+const ACCESS_KEY = 'catframe.accessToken';
+const REFRESH_KEY = 'catframe.refreshToken';
 
 export type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated';
 

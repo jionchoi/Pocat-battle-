@@ -30,7 +30,7 @@ import {
  * No "egg" placeholder icon. A missing avatar falls back to the player's initials over a
  * tinted surface, which is both more distinctive and more informative.
  *
- * `uri` accepts either a real image URL or a `catsnap://avatar/<id>` identity from the
+ * `uri` accepts either a real image URL or a `catframe://avatar/<id>` identity from the
  * built-in set. The scheme is resolved here rather than passed to `<Image>`, which has no
  * handler for it and raises "No suitable URL request handler found".
  */
@@ -86,7 +86,7 @@ export const Avatar = React.memo(function Avatar({
     );
   }
 
-  // An unresolved `catsnap:` URL — a retired avatar id — drops through to initials rather
+  // An unresolved `catframe:` URL — a retired avatar id — drops through to initials rather
   // than reaching the image loader, which would throw on the scheme.
   if (uri && !isAvatarUrl(uri)) {
     return (

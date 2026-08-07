@@ -1,5 +1,5 @@
 /**
- * CatSnap design system.
+ * Cat Frame design system.
  *
  * Configuration: DESIGN_VARIANCE 8 / MOTION_INTENSITY 6 / VISUAL_DENSITY 4
  * Vibe archetype: neutral chrome, one hot coral, saturated tier badges — the photograph

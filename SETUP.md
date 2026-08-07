@@ -1,4 +1,4 @@
-# CatSnap — setup and run
+# Cat Frame — setup and run
 
 Everything needed to get the app running against a real database. Written for macOS.
 
@@ -137,7 +137,7 @@ Either writes `.env`, migrates, and seeds. To do it by hand instead:
 ```bash
 cd server
 npx prisma generate
-npx prisma migrate dev --name catsnap_init
+npx prisma migrate dev --name catframe_init
 npm run db:seed
 ```
 
@@ -170,7 +170,7 @@ Expo QR screen.
 
 ```bash
 curl http://localhost:4000/health
-# {"ok":true,"service":"catsnap",...}
+# {"ok":true,"service":"catframe",...}
 ```
 
 Then in the app: sign up → the map should load → tap the camera button → point at anything

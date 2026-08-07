@@ -228,10 +228,11 @@ export const SectionHeader = React.memo(function SectionHeader({
 });
 
 /**
- * The CatSnap wordmark. One word, two colours, no logotype file.
+ * The Cat Frame wordmark. Two words, two colours, no logotype file.
  *
- * The accent falls on the second half rather than the first because "Cat" is the noun
- * every competing app also owns — "Snap" is the part that says what this one does.
+ * The accent falls on the second word rather than the first because "Cat" is the noun
+ * every competing app also owns — "Frame" is the part that says what this one does, and
+ * it says it twice over: the frame you compose the shot in, and the frame you keep it in.
  */
 export const Wordmark = React.memo(function Wordmark({
   size = 22,
@@ -245,10 +246,10 @@ export const Wordmark = React.memo(function Wordmark({
   return (
     <Text
       accessibilityRole="header"
-      accessibilityLabel="CatSnap"
+      accessibilityLabel="Cat Frame"
       style={[text.h1, { fontSize: size, lineHeight: size * 1.05, color: c.text }]}
     >
-      Cat<Text style={{ color: marmalade[600] }}>Snap</Text>
+      Cat<Text style={{ color: marmalade[600] }}> Frame</Text>
     </Text>
   );
 });
