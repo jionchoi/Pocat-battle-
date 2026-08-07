@@ -55,6 +55,17 @@ export interface ScoredImage {
  * ever gave — the row stays unscored and the player can spend another reveal on it.
  */
 export async function scorePhoto(image: Buffer): Promise<ScoredImage> {
+  if (config.SCORING_STUB) return stubScore(image);
+
+  if (!config.OPENAI_API_KEY || !config.OPENAI_SCORING_MODEL) {
+    /*
+     * Refused rather than faked. A server with no scorer configured must not quietly
+     * produce numbers — the photo stays unscored and revealable, which is exactly the
+     * state the schema already has a shape for.
+     */
+    throw new HttpError(503, 'Scoring is not configured yet. Your photo is saved.');
+  }
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
@@ -153,6 +164,60 @@ export async function scorePhoto(image: Buffer): Promise<ScoredImage> {
   return {
     result: parsed.data,
     model: config.OPENAI_SCORING_MODEL,
+    version: SCORING_VERSION,
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* The stub                                                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A score invented locally, for building the loop before the scorer exists.
+ *
+ * Derived from the image's own bytes rather than from `Math.random`, so the same photograph
+ * always scores the same. A reveal that produced a different number every time would make
+ * every other part of the pipeline impossible to test — you could never tell a bug from
+ * the dice.
+ *
+ * Every field is plausible and none of it is real. `model: 'stub'` goes into the row, so
+ * these are identifiable forever and can be deleted or re-scored once a key exists.
+ */
+function stubScore(image: Buffer): ScoredImage {
+  // A cheap, stable hash of the file. Any change to the photograph changes the score.
+  let hash = 0;
+  for (let i = 0; i < image.length; i += 997) {
+    hash = (hash * 31 + image[i]!) >>> 0;
+  }
+
+  const pick = <T>(values: readonly T[], salt: number): T =>
+    values[(hash + salt) % values.length]!;
+
+  const composition = 18 + ((hash >>> 2) % 20);
+  const poseRarity = (hash >>> 5) % 22;
+  const catRarity = (hash >>> 8) % 20;
+  const bonus = (hash >>> 11) % 12;
+
+  return {
+    result: {
+      isCat: true,
+      confidence: 0.9,
+      pose: pick(
+        ['sitting', 'standing', 'walking', 'sleeping', 'loafing', 'yawning', 'stretching'],
+        0
+      ),
+      scores: { composition, poseRarity, catRarity, bonus },
+      badges: bonus > 8 ? [pick(['Golden Hour', 'Perfect Loaf', 'Caught Mid-Yawn'], 3)] : [],
+      traits: {
+        coatPattern: pick(['tabby', 'tuxedo', 'calico', 'solid', 'tortie'], 1),
+        primaryColor: pick(['orange', 'grey', 'black', 'white', 'brown'], 2),
+        secondaryColor: null,
+        eyeColor: pick(['green', 'amber', 'blue'], 4),
+        markings: [],
+      },
+      note: 'Stubbed score — no model was called.',
+    },
+    model: 'stub',
     version: SCORING_VERSION,
   };
 }

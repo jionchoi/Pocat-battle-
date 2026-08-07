@@ -24,17 +24,30 @@ const envSchema = z.object({
     .min(1, 'SUPABASE_SERVICE_ROLE_KEY is required'),
 
   /*
-   * Required, not optional.
+   * Optional, so the rest of the app can be built before the scorer is paid for.
    *
-   * Scoring is the product, so a server that boots without the ability to score is a
-   * server that will accept captures and fail every one of them. Better to refuse to
-   * start and say which variable is missing.
+   * Missing them is not tolerated silently: with no key the server refuses to score at
+   * all unless SCORING_STUB is on, and then it stamps every score it invents so those rows
+   * can never be mistaken for real ones.
    */
-  OPENAI_API_KEY: z.string().min(1, 'OPENAI_API_KEY is required'),
+  OPENAI_API_KEY: z.string().optional(),
 
   // Named rather than hardcoded: swapping model is a config change plus a SCORING_VERSION
   // bump, not a code edit. Must accept images and support structured output.
-  OPENAI_SCORING_MODEL: z.string().min(1, 'OPENAI_SCORING_MODEL is required'),
+  OPENAI_SCORING_MODEL: z.string().optional(),
+
+  /*
+   * Invent scores locally instead of calling anybody.
+   *
+   * For building the capture loop end to end without a key. Deliberately a separate switch
+   * rather than "fall back when the key is missing" — a fallback turns a misconfigured
+   * production server into one that quietly makes its scores up, and the whole game is
+   * those numbers meaning something.
+   */
+  SCORING_STUB: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -47,6 +60,24 @@ if (!parsed.success) {
 }
 
 const env = parsed.data;
+
+/*
+ * Two ways to have no scorer, and only one of them is allowed to run.
+ *
+ * Stubbed scores in production would be a leaderboard built on numbers nobody produced, so
+ * that combination stops the process rather than being logged and carried on with.
+ */
+if (env.SCORING_STUB && env.NODE_ENV === 'production') {
+  console.error('SCORING_STUB cannot be enabled in production.');
+  process.exit(1);
+}
+
+if (!env.SCORING_STUB && !env.OPENAI_API_KEY) {
+  console.warn(
+    '[config] No OPENAI_API_KEY. Captures will be stored but every score will fail. ' +
+      'Set SCORING_STUB=true to invent scores locally while building.'
+  );
+}
 
 /**
  * Where user tokens are verified against, and who must have issued them.

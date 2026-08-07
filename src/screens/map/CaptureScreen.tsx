@@ -15,7 +15,7 @@ import { useFramingWindow } from '../../hooks/useFramingWindow';
 import { useLocation } from '../../hooks/useLocation';
 import { photoApi } from '../../api/endpoints';
 import { ApiRequestError } from '../../api/client';
-import { preparePhotoForUpload } from '../../services/catDetection';
+import { uploadCapture } from '../../lib/photoUpload';
 import { useAlbumStore } from '../../store/albumStore';
 import { useAuthStore } from '../../store/authStore';
 import { CAPTURE_PROGRESS, useCaptureStore } from '../../store/captureStore';
@@ -56,9 +56,7 @@ export function CaptureScreen() {
   const resetCapture = useCaptureStore((s) => s.reset);
 
   const upsertPhoto = useAlbumStore((s) => s.upsert);
-  const upsertCat = useAlbumStore((s) => s.upsertCat);
-  const applyRewards = useAuthStore((s) => s.applyCaptureRewards);
-  const shareByDefault = useAuthStore((s) => s.user?.proSubscriptionActive ?? false);
+  const userId = useAuthStore((s) => s.user?.id ?? null);
 
   const [ready, setReady] = useState(false);
 
@@ -139,41 +137,32 @@ export function CaptureScreen() {
 
         if (!shot?.uri) throw new Error('The camera did not return a photo.');
 
-        // Held for the reveal and for "Save to my phone" — see `localUri` on the store.
-        attachLocalPhoto(shot.uri);
+        if (!userId) throw new Error('You are not signed in.');
 
-        const photoBase64 = await preparePhotoForUpload(shot.uri);
+        /*
+         * Straight to storage, not through the API.
+         *
+         * `uploadCapture` downscales and puts the bytes in the bucket under this player's
+         * own folder, which the storage policy is what actually enforces. The request that
+         * follows carries a path — a couple of hundred bytes instead of a couple of
+         * megabytes of base64, and the server fetches the image from storage on a
+         * connection that is not a phone on mobile data.
+         */
+        const uploaded = await uploadCapture(shot.uri, userId);
+
+        // The downscaled copy is what the reveal renders and what "Save to phone" writes.
+        attachLocalPhoto(uploaded.localUri);
         advance(CAPTURE_PROGRESS.prepared);
 
         beginScoring(position);
 
-        const result = await photoApi.submit({
-          photoBase64,
+        const result = await photoApi.capture({
+          storagePath: uploaded.storagePath,
           location: position,
-          clientConfidence: detection.bestConfidence,
-          framingHeldMs: Math.round(framing.heldMs()),
-          autoCaptured: auto,
-          // Every capture attempt optionally logs a map pin (README 9.6).
-          logSighting: true,
-          // The camera has no share control any more — see CaptureOverlay. Whether a shot
-          // is public is decided on the reveal, with the photo in front of the player;
-          // this only carries the account default (Pro auto-shares).
-          shareToFeed: shareByDefault,
+          capturedAt: new Date().toISOString(),
         });
-
-        if (result.outcome === 'rejected') {
-          reject(result.reason, result.message);
-          return;
-        }
 
         await upsertPhoto(result.photo);
-        upsertCat(result.cat);
-        applyRewards({
-          xpAwarded: result.xpAwarded,
-          scoreAwarded: result.photo.scores.total,
-        });
-
-        succeed(result);
 
         // Let the scoring ring close before the reveal takes over. Cutting away while the
         // arc is still filling wastes the one moment the wait was building towards, and
@@ -197,20 +186,16 @@ export function CaptureScreen() {
     },
     [
       advance,
-      applyRewards,
       attachLocalPhoto,
       beginCapture,
       beginScoring,
-      detection.bestConfidence,
-      framing,
       navigation,
       position,
       reject,
       resetCapture,
-      shareByDefault,
       succeed,
-      upsertCat,
       upsertPhoto,
+      userId,
     ]
   );
 

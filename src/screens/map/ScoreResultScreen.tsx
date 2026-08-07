@@ -20,12 +20,12 @@ import {
   Check,
   DownloadSimple,
   Images,
+  LockSimple,
   type IconProps,
 } from 'phosphor-react-native';
 
 import { Button } from '../../components/Button';
 import { CircleButton } from '../../components/CircleButton';
-import { CaptionSuggestions } from '../../components/CaptionSuggestionChip';
 import { ScoreBreakdown } from '../../components/ScoreBreakdown';
 import { ConfirmSheet } from '../../components/BottomSheet';
 import { TextField } from '../../components/TextField';
@@ -46,6 +46,7 @@ import {
   useReduceMotion,
 } from '../../theme';
 import { TierCrest } from '../../components/TierCrest';
+import type { ScoredCapture } from '../../models';
 import type { MapStackParamList } from '../../navigation/types';
 
 /**
@@ -212,9 +213,21 @@ export function ScoreResultScreen() {
   const saveToDex = useCallback(async () => {
     if (!result || pinned) return;
 
+    /*
+     * Nothing to pin to yet.
+     *
+     * A Dex card belongs to a cat, and a freshly captured photo has no cat until the
+     * player confirms which one it is — `photo.catId` is empty until then. Rather than
+     * pin to nothing, this says so; the control comes back with identification.
+     */
+    if (!result.photo.catId) {
+      showToast('Identify the cat first, then you can pin this photo to its card.', 'neutral');
+      return;
+    }
+
     setBusy('dex');
     try {
-      await pinDexPhoto(result.cat.id, result.photo.id);
+      await pinDexPhoto(result.photo.catId, result.photo.id);
       setPinned(true);
       showToast(`This is now ${result.photo.catNickname}'s photo in your Dex.`, 'success');
     } catch {
@@ -303,7 +316,7 @@ export function ScoreResultScreen() {
     );
   }
 
-  const { photo, cat, isNewCat, captionSuggestions, xpAwarded, rankUp } = result;
+  const { photo, allowance, scored } = result;
 
   return (
     <View style={styles.root}>
@@ -353,25 +366,42 @@ export function ScoreResultScreen() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
+        {/*
+          Two heroes, and which one shows is the whole shape of this screen.
+
+          A scored capture gets the number it came for. One beyond the allowance gets the
+          photograph, kept and safe, and an honest sentence about when it can be judged —
+          not an error, and not a zero dressed up as a score. The shutter was never the
+          thing being rationed.
+        */}
         <Animated.View style={[styles.hero, scoreStyle]}>
-          <Text style={[text.eyebrow, styles.eyebrow]}>Your score</Text>
-          <Text style={[text.displayHuge, styles.score]}>{photo.scores.total}</Text>
+          {scored ? (
+            <>
+              <Text style={[text.eyebrow, styles.eyebrow]}>Your score</Text>
+              <Text style={[text.displayHuge, styles.score]}>{photo.scores.total}</Text>
 
-          <TierCrest tier={photo.tier} style={styles.crest} />
-          <Text style={[text.h2, styles.tierLabel]}>{photo.tier}</Text>
-
-          <Text style={[text.bodySm, styles.subtitle]}>
-            {isNewCat
-              ? `${photo.catNickname} is new — nobody had photographed this cat before.`
-              : `${photo.catNickname}, photographed ${cat.encounterCount} times.`}
-          </Text>
+              <TierCrest tier={photo.tier} style={styles.crest} />
+              <Text style={[text.h2, styles.tierLabel]}>{photo.tier}</Text>
+            </>
+          ) : (
+            <>
+              <Text style={[text.eyebrow, styles.eyebrow]}>Saved, not yet scored</Text>
+              <View style={styles.lockedMark}>
+                <LockSimple size={40} weight="fill" color={arena.textMuted} />
+              </View>
+              <Text style={[text.h2, styles.tierLabel]}>In your album</Text>
+              <Text style={[text.bodySm, styles.subtitle]}>
+                {allowanceLine(allowance)}
+              </Text>
+            </>
+          )}
         </Animated.View>
 
         {/*
           Badges are the one place tilt is allowed. They are the closest thing this app
           has to stickers, and stickers put on straight look printed rather than applied.
         */}
-        {photo.badges.length > 0 ? (
+        {scored && photo.badges.length > 0 ? (
           <View style={styles.badgeRow}>
             {photo.badges.map((badge, index) => (
               <View
@@ -387,18 +417,18 @@ export function ScoreResultScreen() {
           </View>
         ) : null}
 
-        {rankUp ? (
-          <View style={styles.rankUp}>
-            <Text style={[text.h3, { color: arena.text }]}>
-              {`Rank ${rankUp.to} — ${rankUp.title}`}
-            </Text>
-            <Text style={[text.bodySm, styles.subtitle]}>
-              New camera filters and frames are available in the shop.
-            </Text>
-          </View>
-        ) : (
-          <Text style={[text.caption, styles.xp]}>{`+${xpAwarded} XP`}</Text>
-        )}
+        {/*
+          XP and rank-up used to sit here. Both are gone until something actually awards
+          them — a "+0 XP" under a real score is worse than nothing, because it reads as
+          the capture having been worth nothing.
+        */}
+        {scored && allowance.remaining !== null ? (
+          <Text style={[text.caption, styles.xp]}>
+            {allowance.remaining === 1
+              ? '1 score left today'
+              : `${allowance.remaining} scores left today`}
+          </Text>
+        ) : null}
 
         {/*
           The two decisions, side by side because they are alternatives rather than a
@@ -504,14 +534,11 @@ export function ScoreResultScreen() {
             <View style={styles.captionBlock}>
               <Text style={[text.h3, { color: arena.text }]}>Add a caption</Text>
 
-              <CaptionSuggestions
-                suggestions={captionSuggestions}
-                selected={caption || null}
-                onSelect={setCaptionText}
-                context="arena"
-                style={styles.suggestions}
-              />
-
+              {/*
+                The suggestion chips are gone with the response field that fed them.
+                Nothing generates captions yet, and three empty chips would be a control
+                that looks broken rather than one that is honestly absent.
+              */}
               <TextField
                 label="Caption"
                 value={caption}
@@ -555,6 +582,22 @@ export function ScoreResultScreen() {
       />
     </View>
   );
+}
+
+/**
+ * When the next score frees up, in words.
+ *
+ * The window rolls, so there is no "tomorrow" to promise — the honest answer is a time, and
+ * it comes from the server rather than being counted down here, because the clock that
+ * matters is the one doing the rationing.
+ */
+function allowanceLine(allowance: ScoredCapture['allowance']): string {
+  if (!allowance.resetsAt) return 'Open it from your album to reveal the score.';
+
+  const at = new Date(allowance.resetsAt);
+  const time = at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+
+  return `Your next score unlocks around ${time}. The photo is safe in your album until then.`;
 }
 
 /**
@@ -771,6 +814,16 @@ const styles = StyleSheet.create({
   },
   miniLabelDone: {
     color: marmalade[500],
+  },
+  /** Stands in for the crest on a capture that has not been judged yet. */
+  lockedMark: {
+    marginTop: spacing.md,
+    width: 72,
+    height: 72,
+    borderRadius: radii.full,
+    backgroundColor: arena.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   miniNote: {
     marginTop: spacing.xs,

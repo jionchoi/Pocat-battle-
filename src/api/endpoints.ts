@@ -10,12 +10,12 @@ import type {
   LeaderboardMetric,
   LeaderboardScope,
   Photo,
-  PhotoSubmission,
-  PhotoSubmissionResult,
   PhotoWithAuthor,
   PublicProfile,
   Rarity,
   Reaction,
+  RevealAllowance,
+  ScoredCapture,
   ShopItem,
   User,
 } from '../models';
@@ -73,12 +73,30 @@ export const authApi = {
 /* --------------------------------- photos --------------------------------- */
 
 export const photoApi = {
-  submit: (body: PhotoSubmission) =>
-    api.post<PhotoSubmissionResult>('/photos', body, {
-      // A photo upload plus a Vision round trip plus a caption call is slow on mobile
-      // data. This has to outlast all three or a good capture is lost to a timeout.
-      timeoutMs: 45_000,
-    }),
+  /**
+   * Records a capture.
+   *
+   * The bytes are already in storage — the phone put them there itself, under a policy
+   * that only lets it write into its own folder. This call carries the path, not the
+   * image; the old base64 body inflated every upload by a third and pushed full-size
+   * photos through the API process on their way to a bucket it was standing next to.
+   */
+  capture: (body: {
+    storagePath: string;
+    location: GeoPoint;
+    capturedAt?: string;
+  }) => api.post<ScoredCapture>('/photos', body, { timeoutMs: 60_000 }),
+
+  /** Spends an allowance on a photo that was stored without a score. */
+  reveal: (photoId: string) =>
+    api.post<{ photo: Photo; allowance: RevealAllowance }>(
+      `/photos/${photoId}/reveal`,
+      {},
+      { timeoutMs: 60_000 }
+    ),
+
+  /** What is left in the rolling window. */
+  allowance: () => api.get<RevealAllowance>('/photos/allowance'),
 
   detail: (photoId: string) => api.get<{ photo: Photo }>(`/photos/${photoId}`),
 

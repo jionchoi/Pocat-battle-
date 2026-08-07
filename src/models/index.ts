@@ -134,6 +134,17 @@ export interface Photo {
   reactions: Record<Reaction, number>;
   /** The signed-in player's reaction, when they have one. */
   myReaction: Reaction | null;
+
+  /**
+   * When the score was revealed, or null while it is still waiting for one.
+   *
+   * The one field that says whether `scores` means anything. Everything that draws a
+   * number checks this first, because an unscored photo carries zeroes rather than
+   * absent fields — see the serializer's note on why.
+   */
+  scoredAt: string | null;
+  /** When the player confirmed which cat this is. Null until they do. */
+  identifiedAt: string | null;
 }
 
 /** Feed and leaderboard rows carry their author inline to avoid a second request. */
@@ -328,23 +339,10 @@ export interface Vote {
 /* Capture flow                                                       */
 /* ------------------------------------------------------------------ */
 
-export interface PhotoSubmission {
-  /** base64 JPEG, downscaled client-side before upload. */
-  photoBase64: string;
-  location: GeoPoint;
-  /** Client-side detection confidence. Advisory only — Node re-verifies. */
-  clientConfidence: number;
-  /**
-   * Milliseconds the player waited inside the framing window before shooting. Advisory
-   * telemetry for tuning the window length; it does not feed the score, because a client
-   * number that raised your score would be the first thing anyone forged.
-   */
-  framingHeldMs: number;
-  /** True when the window expired and the app shot for them. */
-  autoCaptured: boolean;
-  logSighting: boolean;
-  shareToFeed: boolean;
-}
+/*
+ * `PhotoSubmission` is gone. The phone uploads to storage itself and the request carries a
+ * path, so there is no base64 body left to describe — see photoApi.capture.
+ */
 
 export type SubmissionRejectionReason =
   | 'no-cat-detected'
@@ -354,25 +352,36 @@ export type SubmissionRejectionReason =
   | 'album-full'
   | 'vision-unavailable';
 
-export interface ScoredCapture {
-  photo: Photo;
-  cat: Cat;
-  /** True when this capture created a new Cat Dex entry. */
-  isNewCat: boolean;
-  /** Editable suggestions for the caption field (README section 2, caption generator). */
-  captionSuggestions: string[];
-  xpAwarded: number;
-  /** Present only when this capture pushed the player into a new Photographer Rank. */
-  rankUp: { from: number; to: number; title: string } | null;
+/**
+ * How many scores a player has left in the rolling window.
+ *
+ * The shutter is never rationed; this is. `limit: null` means unlimited, which is what a
+ * Pro account gets.
+ */
+export interface RevealAllowance {
+  limit: number | null;
+  used: number;
+  remaining: number | null;
+  /** When the next slot frees up. Null while there are slots left. */
+  resetsAt: string | null;
 }
 
-export type PhotoSubmissionResult =
-  | ({ outcome: 'scored' } & ScoredCapture)
-  | {
-      outcome: 'rejected';
-      reason: SubmissionRejectionReason;
-      message: string;
-    };
+/**
+ * What comes back from a capture.
+ *
+ * `scored` is the field everything branches on. A capture beyond the allowance is stored
+ * whole and returns `scored: false` with a photo whose `scoredAt` is null — the score is
+ * revealed from the album later, and until then there is no number to show.
+ *
+ * The cat, the XP and the rank-up that used to ride along are gone until the systems that
+ * produce them exist. Carrying them as zeroes would have put a "+0 XP" on the reveal screen
+ * and a cat nobody identified.
+ */
+export interface ScoredCapture {
+  photo: Photo;
+  allowance: RevealAllowance;
+  scored: boolean;
+}
 
 /* ------------------------------------------------------------------ */
 /* Social                                                             */
