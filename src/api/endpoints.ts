@@ -1,11 +1,13 @@
 import type {
   Cat,
+  CatCandidate,
   CatProfile,
   Challenge,
   ChallengeGoal,
   ChallengeLeader,
   CatSighting,
   GeoPoint,
+  Identification,
   LeaderboardEntry,
   LeaderboardMetric,
   LeaderboardScope,
@@ -14,7 +16,8 @@ import type {
   PublicProfile,
   Rarity,
   Reaction,
-  RevealAllowance,
+  AlbumUsage,
+  Quotas,
   ScoredCapture,
   ShopItem,
   User,
@@ -85,27 +88,76 @@ export const photoApi = {
     storagePath: string;
     location: GeoPoint;
     capturedAt?: string;
+    /**
+     * What the on-device detector saw when the shutter fired.
+     *
+     * `false` tells the server not to spend a scoring call on this one. Send it honestly:
+     * it is the app declining to buy an answer it can already guess, not a claim about the
+     * photograph that earns anything.
+     */
+    detected?: boolean;
   }) => api.post<ScoredCapture>('/photos', body, { timeoutMs: 60_000 }),
 
-  /** Spends an allowance on a photo that was stored without a score. */
+  /**
+   * Spends an allowance on a photo that was stored without a score.
+   *
+   * Answers with the same shape a capture does, failures included: a reveal that could not
+   * reach the scorer is a 200 carrying `scoreError`, not a rejected request. Nothing was
+   * charged, so it is a retry rather than a loss, and the caller should say so.
+   */
   reveal: (photoId: string) =>
-    api.post<{ photo: Photo; allowance: RevealAllowance }>(
-      `/photos/${photoId}/reveal`,
-      {},
-      { timeoutMs: 60_000 }
-    ),
+    api.post<ScoredCapture>(`/photos/${photoId}/reveal`, {}, { timeoutMs: 60_000 }),
 
-  /** What is left in the rolling window. */
-  allowance: () => api.get<RevealAllowance>('/photos/allowance'),
+  /** What is left in the rolling window, and how full the album is. */
+  allowance: () => api.get<Quotas>('/photos/allowance'),
 
   detail: (photoId: string) => api.get<{ photo: Photo }>(`/photos/${photoId}`),
 
   update: (
     photoId: string,
-    body: { caption?: string; sharedToFeed?: boolean; showcased?: boolean }
+    body: {
+      caption?: string;
+      sharedToFeed?: boolean;
+      showcased?: boolean;
+      /** Takes the sighting pin down. The coordinates stay on the row either way. */
+      sharedToMap?: boolean;
+    }
   ) => api.patch<{ photo: Photo }>(`/photos/${photoId}`, body),
 
   remove: (photoId: string) => api.delete<void>(`/photos/${photoId}`),
+
+  /**
+   * Confirms which cat this photograph is of.
+   *
+   * The player's answer, not the matcher's. Nothing identifies a photo automatically —
+   * a vision model asked "is this the same cat" is wrong in both directions and the second
+   * kind of wrong quietly merges two animals into one Dex entry, which cannot be untangled
+   * afterwards. So confirmation is the feature: the server shortlists and the player decides.
+   *
+   * `catId` attaches to a cat that already exists — theirs or anyone's. `newCat` says none of
+   * the candidates was right and names a cat nobody has recorded yet; its traits and its
+   * location are promoted off this photograph, which is why there is nothing else to send.
+   *
+   * Also how a mistake is corrected. Calling it again with a different cat moves the
+   * photograph, and the response's `releasedCatId` names what it was moved off.
+   *
+   * Costs no model call. Matching reads traits already stored on the row, so re-identifying
+   * as often as a player likes is pure Postgres.
+   */
+  identify: (
+    photoId: string,
+    body: { catId: string } | { newCat: { nickname: string } }
+  ) => api.post<Identification>(`/photos/${photoId}/identify`, body),
+
+  /**
+   * The shortlist on its own, for identifying a photo from the album.
+   *
+   * Capture and reveal carry their candidates with them, because that is the moment the
+   * sheet opens. This is the other moment: a photograph taken days ago that was never
+   * attached to anybody, opened from the album with "Not this cat?" or with no cat at all.
+   */
+  candidates: (photoId: string) =>
+    api.get<{ candidates: CatCandidate[] }>(`/photos/${photoId}/candidates`),
 
   vote: (photoId: string, reaction: Reaction) =>
     api.post<{

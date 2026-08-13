@@ -12,7 +12,7 @@ import Svg, { Circle } from 'react-native-svg';
 import { BlurView } from 'expo-blur';
 import { Cat, X } from 'phosphor-react-native';
 
-import type { CapturePhase, DetectionBox } from '../store/captureStore';
+import type { CapturePhase } from '../store/captureStore';
 import { CircleButton } from './CircleButton';
 import {
   arena,
@@ -34,49 +34,36 @@ import {
  * Arena context throughout: this is a committed immersive screen, so there is no light
  * surface anywhere on it.
  *
- * ## One control, not two
+ * ## One control, and it belongs to the player
  *
- * The countdown ring and the shutter used to be separate objects — a ring in the middle of
- * the screen and a button in a strip at the bottom — which asked the player to watch one
- * thing and press another. They are now the same object: the ring is the shutter, it sits
- * where the player is already looking, and the arc closing around it is the framing window
- * running out.
+ * The shutter sits in the middle of the screen where the player is already looking, rather
+ * than in a strip at the bottom — that split asked them to watch one thing and press another.
  *
- * That matters because the framing window is the whole skill of this app. A player who
- * does not understand why the ring is counting down will snap instantly every time and
- * never discover that waiting scores higher, so the prompt under it says what to do rather
- * than what is happening.
+ * The ring around it used to be a countdown. A framing window armed itself once the on-device
+ * detector had held a cat for enough frames and then fired on its own, and the copy under it
+ * taught that mechanic. All of it is gone: the detector, the "holding focus" counter, the
+ * countdown and the auto-capture. The phone is not a better judge of the moment than the
+ * person holding it, and the detector was a texture-and-motion placeholder that never judged
+ * cats at all — so what it really did was make people wait to be allowed to photograph one.
+ * The camera is live, the shutter is always armed, and the only thing that fires it is a
+ * finger.
  */
 
 export interface CaptureOverlayProps {
   phase: CapturePhase;
-  box: DetectionBox | null;
-  /** 0..1 through the framing window. */
-  progress: number;
-  remainingMs: number;
-  detectionStreak: number;
-  framesRequired: number;
   onShutter: () => void;
   onClose: () => void;
 }
 
 export const CaptureOverlay = React.memo(function CaptureOverlay({
   phase,
-  box,
-  progress,
-  remainingMs,
-  detectionStreak,
-  framesRequired,
   onShutter,
   onClose,
 }: CaptureOverlayProps) {
   const busy = phase === 'capturing' || phase === 'scoring';
-  const seconds = Math.ceil(remainingMs / 1000);
 
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-      {box ? <DetectionFrame box={box} locked={phase === 'framing'} /> : null}
-
       {/*
         One control up here, and it is the way out.
 
@@ -95,36 +82,16 @@ export const CaptureOverlay = React.memo(function CaptureOverlay({
       </View>
 
       <View style={styles.centre} pointerEvents="box-none">
-        <Shutter
-          phase={phase}
-          progress={progress}
-          onPress={onShutter}
-          disabled={busy}
-        />
+        {/* A plain ring. Nothing counts down in it any more, so nothing sweeps around it. */}
+        <Shutter onPress={onShutter} disabled={busy} />
 
         <View style={styles.prompt} pointerEvents="none">
-          <PromptCopy
-            phase={phase}
-            detectionStreak={detectionStreak}
-            framesRequired={framesRequired}
-          />
+          <PromptCopy phase={phase} />
         </View>
-
-        {/*
-          The countdown is a bare numeral with no label. At 88pt under a closing ring it
-          needs no explaining, and "3s remaining" next to it would be the app narrating
-          something the player can already see.
-        */}
-        {phase === 'framing' && seconds > 0 ? (
-          <Text style={[text.displayHuge, styles.countdown]}>{seconds}</Text>
-        ) : null}
       </View>
 
       <View style={styles.bottom} pointerEvents="none">
-        <ModePill
-          label={phase === 'framing' ? 'Auto capture' : 'Tap to shoot'}
-          active={phase === 'framing'}
-        />
+        <ModePill label="Tap to shoot" />
       </View>
     </View>
   );
@@ -163,18 +130,12 @@ const ModePill = React.memo(function ModePill({
 /**
  * Prompt copy, per phase.
  *
- * "Wait for a better moment" is doing the teaching: it is the one sentence that explains
- * why the countdown exists at all.
+ * Three states, and none of them asks the player to wait for the app. This used to teach the
+ * framing window, because the countdown was the mechanic. With the shutter back in the
+ * player's hands there is no mechanic to explain, so the resting line says what the camera is
+ * for and then gets out of the way.
  */
-const PromptCopy = React.memo(function PromptCopy({
-  phase,
-  detectionStreak,
-  framesRequired,
-}: {
-  phase: CapturePhase;
-  detectionStreak: number;
-  framesRequired: number;
-}) {
+const PromptCopy = React.memo(function PromptCopy({ phase }: { phase: CapturePhase }) {
   if (phase === 'capturing') {
     return <Text style={[text.h3, styles.promptText]}>Holding still</Text>;
   }
@@ -183,69 +144,8 @@ const PromptCopy = React.memo(function PromptCopy({
     return <Text style={[text.h3, styles.promptText]}>Scoring your shot</Text>;
   }
 
-  if (phase === 'framing') {
-    return (
-      <Text style={[text.h3, styles.promptText]}>Wait for a better moment</Text>
-    );
-  }
-
-  if (detectionStreak > 0) {
-    return (
-      <Text style={[text.bodySm, styles.promptSub]}>
-        {`Holding focus ${detectionStreak} of ${framesRequired}`}
-      </Text>
-    );
-  }
-
   return (
     <Text style={[text.bodySm, styles.promptSub]}>Point the camera at a cat</Text>
-  );
-});
-
-/** Detection bounding box. A thin rounded rect, well behind the ring in emphasis. */
-const DetectionFrame = React.memo(function DetectionFrame({
-  box,
-  locked,
-}: {
-  box: DetectionBox;
-  locked: boolean;
-}) {
-  const reduceMotion = useReduceMotion();
-  const settle = useSharedValue(0);
-
-  useEffect(() => {
-    settle.value = reduceMotion
-      ? locked
-        ? 1
-        : 0
-      : withTiming(locked ? 1 : 0, {
-          duration: 320,
-          easing: Easing.bezier(0.32, 0.72, 0, 1),
-        });
-  }, [locked, reduceMotion, settle]);
-
-  const animated = useAnimatedStyle(() => ({
-    borderColor: locked ? arena.hairlineHi : arena.hairline,
-    opacity: 0.4 + settle.value * 0.35,
-    transform: [{ scale: 1 + (1 - settle.value) * 0.02 }],
-  }));
-
-  return (
-    <Animated.View
-      pointerEvents="none"
-      accessibilityElementsHidden
-      importantForAccessibility="no"
-      style={[
-        styles.detection,
-        {
-          left: `${box.x * 100}%`,
-          top: `${box.y * 100}%`,
-          width: `${box.width * 100}%`,
-          height: `${box.height * 100}%`,
-        },
-        animated,
-      ]}
-    />
   );
 });
 
@@ -257,7 +157,7 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 /**
- * The shutter: a ring you can press, with the framing window drawn around its edge.
+ * The shutter: a ring you can press. The player decides the moment; nothing else fires it.
  *
  * The arc is a real SVG stroke driven by `strokeDashoffset` through `useAnimatedProps`,
  * so it runs on the UI thread. That matters more here than anywhere else in the product —
@@ -268,34 +168,14 @@ const AnimatedCircle = Animated.createAnimatedComponent(Circle);
  * just means the app takes the shot for you.
  */
 const Shutter = React.memo(function Shutter({
-  phase,
-  progress,
   onPress,
   disabled,
 }: {
-  phase: CapturePhase;
-  progress: number;
   onPress: () => void;
   disabled: boolean;
 }) {
   const reduceMotion = useReduceMotion();
   const pressed = useSharedValue(0);
-  const sweep = useSharedValue(0);
-  const detected = phase === 'framing';
-
-  const clamped = Math.max(0, Math.min(1, progress));
-
-  useEffect(() => {
-    // Linear is correct here and nowhere else: this represents real elapsed time, and
-    // easing it would make the ring lie about how long is left.
-    sweep.value = reduceMotion
-      ? clamped
-      : withTiming(clamped, { duration: 80, easing: Easing.linear });
-  }, [clamped, reduceMotion, sweep]);
-
-  const arcProps = useAnimatedProps(() => ({
-    strokeDashoffset: RING_CIRCUMFERENCE * (1 - sweep.value),
-  }));
 
   const animated = useAnimatedStyle(() => ({
     transform: [{ scale: 1 - (1 - press.scale) * pressed.value }],
@@ -313,7 +193,7 @@ const Shutter = React.memo(function Shutter({
       }}
       hitSlop={hitSlopFor(RING_SIZE)}
       accessibilityRole="button"
-      accessibilityLabel={detected ? 'Take the shot now' : 'Take a photo'}
+      accessibilityLabel="Take a photo"
       accessibilityState={{ disabled }}
     >
       <Animated.View
@@ -328,29 +208,9 @@ const Shutter = React.memo(function Shutter({
             stroke={arena.hairlineHi}
             strokeWidth={RING_STROKE}
           />
-          {detected ? (
-            <AnimatedCircle
-              cx={RING_SIZE / 2}
-              cy={RING_SIZE / 2}
-              r={RING_RADIUS}
-              fill="none"
-              stroke={marmalade[600]}
-              strokeWidth={RING_STROKE}
-              strokeLinecap="round"
-              strokeDasharray={RING_CIRCUMFERENCE}
-              // Starts at twelve o'clock rather than three, so the arc closes the way a
-              // clock does and not from an arbitrary point on the right-hand side.
-              transform={`rotate(-90 ${RING_SIZE / 2} ${RING_SIZE / 2})`}
-              animatedProps={arcProps}
-            />
-          ) : null}
         </Svg>
 
-        <Cat
-          size={56}
-          weight={detected ? 'fill' : 'regular'}
-          color={detected ? chrome.text : arena.textMuted}
-        />
+        <Cat size={56} weight="regular" color={arena.textMuted} />
       </Animated.View>
     </Pressable>
   );
@@ -392,15 +252,6 @@ const styles = StyleSheet.create({
   promptSub: {
     color: arena.textMuted,
     textAlign: 'center',
-  },
-  countdown: {
-    marginTop: spacing.xs,
-    color: chrome.text,
-  },
-  detection: {
-    position: 'absolute',
-    borderWidth: 2,
-    borderRadius: radii.lg,
   },
   bottom: {
     position: 'absolute',

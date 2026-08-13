@@ -3,7 +3,7 @@ import { create } from 'zustand';
 import { ApiRequestError } from '../api/client';
 import { albumApi, catdexApi, photoApi } from '../api/endpoints';
 import { ALBUM_CONFIG } from '../constants/game';
-import type { Cat, Photo, Rarity } from '../models';
+import type { Cat, IdentifyChoice, Identification, Photo, Rarity } from '../models';
 import { readPhotos, replacePhotos, deletePhoto as deleteLocalPhoto, writePhoto } from '../services/database';
 import { useAuthStore } from './authStore';
 
@@ -42,9 +42,12 @@ interface AlbumState {
   clearFilters: () => void;
   upsert: (photo: Photo) => Promise<void>;
   upsertCat: (cat: Cat) => void;
+  /** Records which cat a photo is of. Also how a wrong answer is corrected. */
+  identify: (photoId: string, choice: IdentifyChoice) => Promise<Identification>;
   setCaption: (photoId: string, caption: string) => Promise<void>;
   setShared: (photoId: string, shared: boolean) => Promise<void>;
   setShowcased: (photoId: string, showcased: boolean) => Promise<void>;
+  setSharedToMap: (photoId: string, sharedToMap: boolean) => Promise<void>;
   remove: (photoId: string) => Promise<void>;
   renameCat: (catId: string, nickname: string, bio?: string) => Promise<void>;
   pinDexPhoto: (catId: string, photoId: string) => Promise<void>;
@@ -66,7 +69,20 @@ export const useAlbumStore = create<AlbumState>((set, get) => ({
   loadingMore: false,
 
   load: async (options) => {
-    const ownerId = useAuthStore.getState().user?.id;
+    /*
+     * The session's id, not the profile's.
+     *
+     * `applySession` leaves `user` null when the profile fetch fails on anything but a
+     * missing row — the session is real, so the player stays signed in. Reading the profile
+     * here meant one failed read at launch made this return before doing anything, with no
+     * error and no log: an album stuck empty on `idle` for the whole session, and nothing on
+     * screen or in the console saying a request had never been made. The album is the
+     * player's own photographs, and the server already knows who they are from the token.
+     *
+     * It is the same id either way — `fetchMe` is given `session.user.id` — so the SQLite
+     * cache keyed on it does not change hands.
+     */
+    const ownerId = useAuthStore.getState().session?.user?.id;
     if (!ownerId) return;
 
     const hadData = get().photos.length > 0;
@@ -95,18 +111,31 @@ export const useAlbumStore = create<AlbumState>((set, get) => ({
       const unfiltered = Object.keys(get().filters).length === 0;
       if (unfiltered) await replacePhotos(ownerId, photos);
     } catch (err) {
-      const offline = err instanceof ApiRequestError && err.status === 0;
       const hasData = get().photos.length > 0;
 
+      /*
+       * Any failure makes what is on screen stale, not just a dropped connection.
+       *
+       * `stale` used to be set only for `status === 0`, so a 401 or a 500 painted the local
+       * cache as though it were fresh — same rows, no badge, no error. The failure mode that
+       * produces is genuinely baffling to look at: the cache can hold photographs whose
+       * objects are no longer in the bucket, and the grid then draws correctly sized tiles
+       * with nothing inside them and says nothing is wrong. Cached data is worth showing;
+       * pretending it was just fetched is not.
+       */
       set({
         phase: hasData ? 'ready' : 'error',
-        stale: offline && hasData,
+        stale: hasData,
         error: hasData
           ? null
           : err instanceof ApiRequestError
             ? err.message
             : 'We could not load your album.',
       });
+
+      // Logged even when it is swallowed for the player's benefit. A silently absorbed album
+      // failure is how a schema or auth problem hides behind a screen that looks fine.
+      console.warn('[album] refresh failed, showing cached photos:', err);
     }
   },
 
@@ -183,6 +212,35 @@ export const useAlbumStore = create<AlbumState>((set, get) => ({
     });
   },
 
+  /**
+   * The player's answer to "which cat is this?".
+   *
+   * Not optimistic, and not because of latency. The response is the only thing that knows
+   * what the write actually did — whether a cat was created, what its id is, what the entry's
+   * encounter count and best photo now are — and every one of those would be a guess here.
+   *
+   * Both objects come back because both changed, which is what lets the album and the Dex
+   * update from one response instead of refetching two lists to find out.
+   */
+  identify: async (photoId, choice) => {
+    const result = await photoApi.identify(photoId, choice);
+
+    await get().upsert(result.photo);
+    get().upsertCat(result.cat);
+
+    /*
+     * A correction is a leave and a join, and only the join comes back.
+     *
+     * `releasedCatId` names the entry the photograph moved *off*, which lost an encounter and
+     * re-promoted its next-best photo — or vanished entirely, if this was the only shot the
+     * player had of it. None of that is in the response, and guessing at it is exactly the
+     * case the model's own note says to refetch rather than patch.
+     */
+    if (result.releasedCatId) void get().loadCatDex();
+
+    return result;
+  },
+
   setCaption: async (photoId, caption) => {
     const previous = get().photos;
 
@@ -219,6 +277,22 @@ export const useAlbumStore = create<AlbumState>((set, get) => ({
     // a photo as pinned that then un-pins is worse than a brief wait.
     const { photo } = await photoApi.update(photoId, { showcased });
     await get().upsert(photo);
+  },
+
+  setSharedToMap: async (photoId, sharedToMap) => {
+    const previous = get().photos;
+    set({ photos: previous.map((p) => (p.id === photoId ? { ...p, sharedToMap } : p)) });
+
+    try {
+      const { photo } = await photoApi.update(photoId, { sharedToMap });
+      await get().upsert(photo);
+    } catch (err) {
+      // Same rollback as `setShared`, and for the sharper version of the same reason: a
+      // switch that stayed off after failing to turn off would tell a player their location
+      // is private while a pin is still on the map.
+      set({ photos: previous });
+      throw err;
+    }
   },
 
   remove: async (photoId) => {

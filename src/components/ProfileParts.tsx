@@ -90,6 +90,7 @@ export const ShowcaseTile = React.memo(function ShowcaseTile({
   onPress?: () => void;
 }) {
   const Container = onPress ? Pressable : View;
+  const [failed, setFailed] = React.useState(false);
 
   return (
     <Container
@@ -98,16 +99,48 @@ export const ShowcaseTile = React.memo(function ShowcaseTile({
       accessibilityLabel={`${photo.catNickname}, scored ${photo.scores.total}, ${photo.tier}`}
       style={[styles.showcaseTile, { width }]}
     >
-      <Image
-        source={photo.imageUrl || undefined}
-        contentFit="cover"
-        transition={200}
-        style={StyleSheet.absoluteFill}
-        accessible={false}
-      />
-      <View style={styles.showcaseCorners} pointerEvents="none">
-        <ScoreChip score={photo.scores.total} />
-        <RarityBadge rarity={photo.tier} size="sm" compact />
+      {/*
+        The aspect-ratio box is this plain View, not the Pressable around it.
+        
+        They were the same element, and the tile rendered as a correctly sized white blank:
+        an `absoluteFill` child resolves its height against its parent's *resolved* height,
+        and a parent whose height comes from `aspectRatio` on a pressability wrapper can hand
+        it zero. The box took up space, the photograph painted nothing, and no error was
+        raised because nothing had failed. `PhotoCard` never had the bug because it has always
+        kept the ratio on an inner View — this now matches it.
+      */}
+      <View style={styles.showcaseFrame}>
+        <Image
+          source={photo.imageUrl || undefined}
+          contentFit="cover"
+          transition={200}
+          style={StyleSheet.absoluteFill}
+          accessible={false}
+          /*
+           * A tile that cannot load its photograph says so.
+           *
+           * Without this the failure is invisible: the box is sized from `aspectRatio`, so a
+           * dead URL leaves a correctly proportioned empty space that looks like a layout bug
+           * rather than a missing image, and there is nothing on screen or in the log to say
+           * which of the two it is. The url is logged because it is the only thing that
+           * distinguishes "the row is wrong" from "the object is gone".
+           */
+          onError={(event) => {
+            setFailed(true);
+            console.warn('[showcase] image failed', photo.id, photo.imageUrl, event?.error);
+          }}
+        />
+
+        {failed || !photo.imageUrl ? (
+          <View style={styles.showcaseMissing}>
+            <Text style={[text.caption, { color: paper.textFaint }]}>No image</Text>
+          </View>
+        ) : null}
+
+        <View style={styles.showcaseCorners} pointerEvents="none">
+          <ScoreChip score={photo.scores.total} />
+          <RarityBadge rarity={photo.tier} size="sm" compact />
+        </View>
       </View>
     </Container>
   );
@@ -270,10 +303,19 @@ const styles = StyleSheet.create({
     color: paper.textSubtle,
   },
   showcaseTile: {
-    aspectRatio: 4 / 5,
     borderRadius: radii.lg,
     overflow: 'hidden',
     backgroundColor: paper.sunken,
+  },
+  /** Owns the ratio, so the image has a real height to fill. See the note at the call site. */
+  showcaseFrame: {
+    width: '100%',
+    aspectRatio: 4 / 5,
+  },
+  showcaseMissing: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   showcaseCorners: {
     position: 'absolute',

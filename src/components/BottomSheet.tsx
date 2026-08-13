@@ -1,5 +1,7 @@
 import React, { useEffect } from 'react';
 import {
+  KeyboardAvoidingView,
+  Platform,
   Modal as RNModal,
   Pressable,
   ScrollView,
@@ -78,8 +80,6 @@ export function BottomSheet({
     transform: [{ translateY: (1 - progress.value) * 420 }],
   }));
 
-  const Body = scrollable ? ScrollView : View;
-
   return (
     <RNModal
       visible={visible}
@@ -88,7 +88,23 @@ export function BottomSheet({
       onRequestClose={onClose}
       statusBarTranslucent
     >
-      <View style={styles.root}>
+      {/*
+        Lifted clear of the keyboard.
+
+        A sheet is pinned to the bottom of the screen, which is exactly where a keyboard
+        appears — so any sheet containing a text field was completely covered by it the
+        moment the field took focus. "Name this cat" was unusable: the player could type,
+        but could not see the field or reach the button that submits it.
+
+        `padding` on iOS rather than `height`, because the sheet is laid out by
+        `justifyContent: flex-end` and shrinking the container is what moves it up. Android
+        resizes the window itself under the default `adjustResize`, so it needs nothing and
+        adding it would move the sheet twice.
+      */}
+      <KeyboardAvoidingView
+        style={styles.root}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
         <Animated.View style={[styles.scrim, { backgroundColor: c.scrim }, scrimStyle]}>
           <Pressable
             style={StyleSheet.absoluteFill}
@@ -128,10 +144,26 @@ export function BottomSheet({
               </View>
             ) : null}
 
-            <Body style={scrollable ? styles.scrollBody : undefined}>{children}</Body>
+            {/*
+              `keyboardShouldPersistTaps` matters on the scrollable branch and only there:
+              without it the first tap on a button while the keyboard is up is swallowed to
+              dismiss the keyboard, so submitting a name takes two taps and the first one
+              looks like the button is broken.
+            */}
+            {scrollable ? (
+              <ScrollView
+                style={styles.scrollBody}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              >
+                {children}
+              </ScrollView>
+            ) : (
+              <View>{children}</View>
+            )}
           </View>
         </Animated.View>
-      </View>
+      </KeyboardAvoidingView>
     </RNModal>
   );
 }

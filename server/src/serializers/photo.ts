@@ -1,4 +1,5 @@
 import { publicUrlFor } from '../lib/storage.js';
+import type { TraitSet } from '../game/matching.js';
 
 /**
  * Database rows to the shapes the app already reads.
@@ -30,10 +31,34 @@ export interface PhotoRow {
   scored_at: string | null;
   shared_to_feed: boolean;
   showcased: boolean;
+  shared_to_map: boolean;
+  /*
+   * The community layer, added by the 2026-08-12 migration.
+   *
+   * Optional on this type rather than required, because `serializePhoto` is used on rows
+   * selected before the migration ran and on rows built in tests. Every read of them below
+   * defaults, so a row without them serializes as a photograph nobody has reacted to — which
+   * is what it is.
+   */
+  community_score?: number;
+  view_count?: number;
+  vote_count?: number;
+  featured?: boolean;
+
+  /** Set once the scorer reported no cat. While set, the model is never called again. */
+  no_cat_at: string | null;
+  scoring_attempts: number;
+  /**
+   * What the scoring call said the animal looks like.
+   *
+   * Kept on the row rather than only promoted onto the cat, so a later matching pass can
+   * reconsider a photograph without paying to look at the image again. `{}` on anything
+   * unscored, which is why every field of `TraitSet` is optional.
+   */
+  traits: TraitSet;
 }
 
 export function serializePhoto(row: PhotoRow, catNickname: string | null) {
-  const scored = row.scored_at !== null;
 
   return {
     id: row.id,
@@ -73,18 +98,29 @@ export function serializePhoto(row: PhotoRow, catNickname: string | null) {
     showcased: row.showcased,
 
     /*
-     * The community layer does not exist yet — no votes table, no view counts. These are
-     * the shapes the client's type demands, held at their empty values until the feed
-     * migration gives them somewhere to come from.
+     * The coordinates go to the owner either way; this only says whether a pin goes to
+     * anybody else.
+     *
+     * `capturedLocation` above is the exact pair, and it is correct to send it here because
+     * every route using this serializer answers the photo's own owner. The map serializer is
+     * a different file and a different audience, and it is the one that has to coarsen.
      */
-    voteCount: 0,
-    communityScore: 0,
-    viewCount: 0,
-    featured: false,
+    sharedToMap: row.shared_to_map,
+
+    /*
+     * Real now, where they used to be hard-coded zeroes waiting on the community migration.
+     *
+     * `reactions` and `myReaction` are still empty here and that is correct rather than
+     * pending: this serializer answers a photo's own owner, in their album, where the
+     * per-kind tallies are not drawn and the viewer's own reaction to their own photograph
+     * is not a thing that exists — `VoteRow` is disabled on your own work. The feed
+     * serializer is the one that counts them, because it is the one that shows them.
+     */
+    voteCount: row.vote_count ?? 0,
+    communityScore: row.community_score ?? 0,
+    viewCount: row.view_count ?? 0,
+    featured: row.featured ?? false,
     reactions: { laugh: 0, love: 0, wow: 0 },
     myReaction: null,
-
-    // Set to true only on a photo scored by this request, so the reveal knows to animate.
-    isScoredNow: scored,
   };
 }

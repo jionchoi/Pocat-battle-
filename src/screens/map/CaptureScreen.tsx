@@ -1,17 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { CameraView } from 'expo-camera';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { CaptureOverlay } from '../../components/CaptureOverlay';
 import { ScoringOverlay } from '../../components/ScoringOverlay';
 import { Button } from '../../components/Button';
 import { showToast } from '../../components/Toast';
-import { CAPTURE_CONFIG } from '../../constants/game';
 import { useCameraPermission } from '../../hooks/useCameraPermission';
-import { useCatDetection } from '../../hooks/useCatDetection';
-import { useFramingWindow } from '../../hooks/useFramingWindow';
 import { useLocation } from '../../hooks/useLocation';
 import { photoApi } from '../../api/endpoints';
 import { ApiRequestError } from '../../api/client';
@@ -26,7 +23,13 @@ import type { MapStackParamList } from '../../navigation/types';
  * Capture Screen (README section 5.2).
  *
  * The whole game loop lives here:
- *   live detection -> stable -> framing window -> shutter (or auto) -> submit -> reveal
+ *   live camera -> shutter -> submit -> reveal
+ *
+ * Capture is manual, entirely. There was an on-device detector feeding a framing window that
+ * armed itself and fired on its own, and it is gone — it was a texture-and-motion heuristic
+ * rather than a cat detector, so what it actually did was make a player wait several frames
+ * for permission to photograph a cat that was plainly there. The person holding the phone
+ * knows when the moment is right. Nothing here second-guesses them.
  *
  * Arena context, fully immersive. The tab bar slides away, the status bar goes light,
  * and there is no light surface anywhere on the screen.
@@ -43,8 +46,6 @@ export function CaptureScreen() {
     useLocation({ watch: true });
 
   const phase = useCaptureStore((s) => s.phase);
-  const box = useCaptureStore((s) => s.box);
-  const setDetection = useCaptureStore((s) => s.setDetection);
   const beginCapture = useCaptureStore((s) => s.beginCapture);
   const attachLocalPhoto = useCaptureStore((s) => s.attachLocalPhoto);
   const advance = useCaptureStore((s) => s.advance);
@@ -56,66 +57,57 @@ export function CaptureScreen() {
   const resetCapture = useCaptureStore((s) => s.reset);
 
   const upsertPhoto = useAlbumStore((s) => s.upsert);
-  const userId = useAuthStore((s) => s.user?.id ?? null);
+
+  /**
+   * From the session, not the profile.
+   *
+   * These are not the same id arriving by two routes. `applySession` deliberately leaves
+   * `user` null when the profile fetch fails on anything but a missing row — the session is
+   * real, so the player stays signed in and carries on — which means one slow or failed read
+   * at launch left this null and broke *every* capture for the rest of the session with
+   * "You are not signed in." The session is the thing that says who somebody is, and it was
+   * there the whole time.
+   *
+   * Capture wants it only to build a storage path, and the path is checked against the
+   * token's `sub` by the bucket policy, so the JWT's own id is also the only one that could
+   * ever be right here.
+   */
+  const userId = useAuthStore((s) => s.session?.user?.id ?? null);
 
   const [ready, setReady] = useState(false);
+
+  /**
+   * Whether this screen is the one being looked at.
+   *
+   * A stack screen is not unmounted when you navigate off it — it stays alive underneath,
+   * and so does everything it started. Every loop below is gated on this, because a camera
+   * screen that keeps running while nobody is on it takes photographs of nothing, fires
+   * auto-captures at a torn-down preview, and reports each one as an error.
+   */
+  const isFocused = useIsFocused();
 
   // Guards a double-fire: the shutter tap and the window's auto-capture can land in the
   // same frame, and submitting the same moment twice would cost the player two slots.
   const submitting = useRef(false);
 
-  /* ----------------------------- detection loop ---------------------------- */
-
-  const captureFrame = useCallback(async (): Promise<string | null> => {
-    if (!camera.current || !ready) return null;
-
-    try {
-      const shot = await camera.current.takePictureAsync({
-        quality: 0.25,
-        skipProcessing: true,
-        // These are analysis frames, not photographs. The detection loop grabs one every
-        // 220ms, and each `takePictureAsync` plays the system shutter by default — which
-        // is a camera audibly firing over and over at someone trying to photograph a cat.
-        // The player never sees these frames and they are never saved.
-        shutterSound: false,
-      });
-      return shot?.uri ?? null;
-    } catch {
-      // The camera can refuse mid-focus or while backgrounding. A dropped analysis
-      // frame is normal and must not surface as an error.
-      return null;
-    }
-  }, [ready]);
-
-  const detection = useCatDetection({
-    captureFrame,
-    enabled:
-      ready && cameraPermission.granted && (phase === 'scanning' || phase === 'framing'),
-  });
-
-  useEffect(() => {
-    setDetection(detection.result?.box ?? null, detection.result?.confidence ?? 0);
-  }, [detection.result, setDetection]);
-
-  /* --------------------------- the framing window -------------------------- */
-
-  // The window needs to fire `submit`, and `submit` needs to read how long the window
-  // was held. Routing the auto-capture through a ref breaks that cycle without making
-  // either one depend on the other's identity.
-  const submitRef = useRef<(auto: boolean) => void>(() => undefined);
-
-  const framing = useFramingWindow({
-    stable: detection.stable,
-    detected: detection.result?.found ?? false,
-    onAutoCapture: () => submitRef.current(true),
-    enabled: ready && cameraPermission.granted,
-  });
+  /**
+   * Set immediately before the reveal takes over.
+   *
+   * The blur handler below abandons an unfinished capture, and a successful one blurs on its
+   * way to the reveal — which is the one departure that must not be treated as abandonment.
+   */
+  const headingToReveal = useRef(false);
 
   /* ------------------------------- submission ------------------------------ */
 
   const submit = useCallback(
-    async (auto: boolean) => {
+    async () => {
       if (submitting.current) return;
+
+      // A tap can still be in flight as the screen goes away. Taking a photograph for
+      // somebody who is no longer looking at the camera is the "Camera unmounted during
+      // taking photo process" error, and it spends a reveal to produce it.
+      if (!isFocused) return;
 
       if (!position) {
         // Location is required: without it the photo cannot be matched to a cat or
@@ -128,7 +120,10 @@ export function CaptureScreen() {
       }
 
       submitting.current = true;
-      beginCapture(auto);
+      beginCapture();
+
+      /** Set when the failure path navigates out, so `finally` does not re-arm the shutter. */
+      let leaving = false;
 
       try {
         const shot = await camera.current?.takePictureAsync({
@@ -160,6 +155,17 @@ export function CaptureScreen() {
           storagePath: uploaded.storagePath,
           location: position,
           capturedAt: new Date().toISOString(),
+          /*
+           * `detected` is deliberately not sent.
+           *
+           * It existed so the phone could tell the server "there is no cat here, do not pay
+           * for a scoring call", and it was worth having while the phone chose the moment.
+           * A manual shutter makes the tap itself the signal: somebody looked at the scene
+           * and decided it was worth a photograph, and a texture heuristic overruling that
+           * would spend their shot to save a call. The server reads an absent flag as
+           * "did not say", which scores — and the reveal allowance, `no_cat_at` and
+           * `scoring_attempts` are all still in front of the model.
+           */
         });
 
         await upsertPhoto(result.photo);
@@ -169,19 +175,61 @@ export function CaptureScreen() {
         // 320ms is under the threshold where a player would call it a delay.
         await new Promise((resolve) => setTimeout(resolve, 320));
 
+        /*
+         * Hand the response to the store before navigating, not after.
+         *
+         * This call was missing entirely, and the symptom was the whole reveal: the screen
+         * reads the capture from `captureStore.result`, so without it every capture arrived
+         * at a screen with nothing to draw. It is placed after the ring's closing beat so
+         * the phase flips to `revealed` on the way out rather than mid-animation.
+         */
+        succeed(result);
+
+        // Before the navigation, so the blur this causes is not mistaken for the player
+        // walking away from an unfinished capture.
+        headingToReveal.current = true;
         navigation.replace('ScoreResult');
       } catch (err) {
+        /*
+         * Logged before it is turned into copy.
+         *
+         * The toast below is deliberately vague, and everything interesting about a failed
+         * capture is thrown away by it — a storage policy rejection, a missing global, a
+         * malformed path all arrive at the player as the same sentence. That is right for
+         * the player and useless for anyone debugging, and this catch sits across three
+         * different subsystems (the camera, the bucket, the API).
+         */
+        console.error('[capture] failed:', err);
+
         const message =
           err instanceof ApiRequestError
             ? err.message
             : 'We could not save that photo. Try again.';
 
-        // A network failure is not a game outcome, so it does not become a rejection
-        // screen — the player stays on the camera and can simply shoot again.
         showToast(message, 'error');
         resetCapture();
+
+        /*
+         * Leave the camera rather than stand on it.
+         *
+         * Staying put looks like resilience and behaves like a trap: the tab bar is hidden
+         * on this screen, so a player left staring at a camera that fails every shot has
+         * nothing to press to escape.
+         *
+         * Backing out to the map is also what puts the map tab back where it belongs: this
+         * screen sits on the map's own stack, so a capture abandoned here is what leaves
+         * the tab showing a camera the next time it is opened.
+         */
+        leaving = navigation.canGoBack();
+        if (leaving) navigation.goBack();
       } finally {
-        submitting.current = false;
+        /*
+         * Latched while we are on our way out, so a tap landing during the transition cannot
+         * run `takePictureAsync` against a camera that is already unmounting. The focus
+         * effect clears it on the way back in, which is what stops the latch outliving one
+         * capture and silently swallowing every shutter press after it.
+         */
+        if (!leaving) submitting.current = false;
       }
     },
     [
@@ -189,6 +237,7 @@ export function CaptureScreen() {
       attachLocalPhoto,
       beginCapture,
       beginScoring,
+      isFocused,
       navigation,
       position,
       reject,
@@ -199,13 +248,49 @@ export function CaptureScreen() {
     ]
   );
 
-  submitRef.current = (auto: boolean) => void submit(auto);
-
   /* --------------------------------- setup -------------------------------- */
 
-  useEffect(() => {
-    resetCapture();
-  }, [resetCapture]);
+  /*
+   * Reset every time the screen is looked at, not once when it is created.
+   *
+   * `phase` lives in a store that outlives this component, and the component outlives being
+   * on screen — a stack keeps it mounted underneath whatever was pushed on top. Resetting on
+   * mount therefore ran exactly once, and every later visit inherited the phase the previous
+   * capture ended on. At `revealed` that made `scoringInProgress` true, which renders the
+   * scoring overlay *instead of* the one carrying the shutter: a camera that cannot be
+   * photographed with and reports nothing wrong, because nothing was.
+   *
+   * Nothing is reset on the way out. The reveal screen reads its result out of this same
+   * store, so clearing on blur would hand it an empty one and put every successful capture on
+   * the "that result has expired" fallback.
+   */
+  useFocusEffect(
+    useCallback(() => {
+      resetCapture();
+      // Cleared here rather than in `submit`'s `finally`, which cannot run on the path that
+      // navigates away — see the note there. A latch that outlives one capture silently
+      // swallows every shutter press after it.
+      submitting.current = false;
+      headingToReveal.current = false;
+    }, [resetCapture])
+  );
+
+  /*
+   * An abandoned capture does not stay on the map's stack.
+   *
+   * This screen is pushed onto the map tab, so leaving it any way other than through the
+   * reveal leaves a camera sitting on top of the map — and the next press of the Map tab
+   * opens the camera again rather than the map. Going back on blur means the tab holds what
+   * its name promises.
+   */
+  useEffect(
+    () =>
+      navigation.addListener('blur', () => {
+        if (headingToReveal.current) return;
+        if (navigation.canGoBack()) navigation.goBack();
+      }),
+    [navigation]
+  );
 
   useEffect(() => {
     if (cameraPermission.state === 'undetermined') void cameraPermission.request();
@@ -274,16 +359,7 @@ export function CaptureScreen() {
       {scoringInProgress ? (
         <ScoringOverlay phase={phase} photoUri={localUri} progress={progress} />
       ) : (
-        <CaptureOverlay
-          phase={phase}
-          box={box}
-          progress={framing.progress}
-          remainingMs={framing.remainingMs}
-          detectionStreak={detection.streak}
-          framesRequired={CAPTURE_CONFIG.stableDetectionFrames}
-          onShutter={() => void submit(false)}
-          onClose={close}
-        />
+        <CaptureOverlay phase={phase} onShutter={() => void submit()} onClose={close} />
       )}
 
       {phase === 'rejected' ? (

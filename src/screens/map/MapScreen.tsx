@@ -108,11 +108,20 @@ export function MapScreen({ navigation }: Props) {
   }, [centred, position, region]);
 
   /**
-   * Record a coarse home area once, for the neighbourhood leaderboard. The server rounds
-   * it to a ~1km cell; this is not a location history.
+   * Record a coarse home area, for the neighbourhood leaderboard and for suppressing capture
+   * pins near where the player lives. The server snaps it to a ~1km cell before storing.
+   *
+   * Sent **once per session**, and the guard is what makes that true. `position` changes with
+   * every GPS fix, so an effect depending on it re-sent on every update and each one overwrote
+   * the last — which quietly turned a home area into a record of wherever the player currently
+   * was. The comment here claimed "once" long before anything enforced it.
    */
+  const homeSent = useRef(false);
+
   useEffect(() => {
-    if (!position || !user) return;
+    if (!position || !user || homeSent.current) return;
+
+    homeSent.current = true;
     authApi.setHomeLocation({ lat: position.lat, lng: position.lng }).catch(() => undefined);
   }, [position, user]);
 

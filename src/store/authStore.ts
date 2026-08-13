@@ -5,7 +5,7 @@ import { configureAuth } from '../api/client';
 import { authApi } from '../api/endpoints';
 import { supabase } from '../lib/supabase';
 import { ProfileMissingError, fetchMe, saveOnboarding } from '../lib/profile';
-import type { Me } from '../models';
+import type { CaptureAward, Me } from '../models';
 
 /**
  * Auth session.
@@ -57,7 +57,7 @@ interface AuthState {
   setUsername: (params: { username: string; avatarUrl?: string }) => Promise<void>;
   deleteAccount: () => Promise<void>;
   /** Applied after a capture whose response already told us the new totals. */
-  applyCaptureRewards: (params: { xpAwarded: number; scoreAwarded: number }) => void;
+  applyCaptureRewards: (params: { award: CaptureAward; scoreAwarded: number }) => void;
   clearError: () => void;
 }
 
@@ -194,21 +194,32 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   /**
-   * Local nudge so the profile meter moves the instant a capture is scored, without a
-   * second round trip. The authoritative rank comes back on the next `refreshUser`; this
-   * only advances XP and the lifetime score, never the rank itself, because recomputing a
-   * rank client-side would be the one number worth forging.
+   * Applies what a capture actually earned, so the profile meter is right immediately.
+   *
+   * This used to be a local *guess* — add the XP, subtract it from the distance to the next
+   * rank, leave the rank alone because "recomputing a rank client-side would be the one
+   * number worth forging". It was also never called from anywhere, which is the more useful
+   * half of the story: it was written before anything awarded XP, and there was nothing to
+   * hand it.
+   *
+   * Now the server sends the totals it just wrote, so nothing here is computed. The rank is
+   * assigned rather than derived for exactly the old reason — the ramp is mirrored on both
+   * sides so a meter can be drawn offline, and when the two disagree the server is right.
+   *
+   * `lifetimeScore` and `photoCount` are still increments: neither is on the award, because
+   * neither is progression. They are corrected by the next `refreshUser` either way.
    */
-  applyCaptureRewards: ({ xpAwarded, scoreAwarded }) => {
+  applyCaptureRewards: ({ award, scoreAwarded }) => {
     const user = get().user;
     if (!user) return;
 
     set({
       user: {
         ...user,
-        photographerXp: user.photographerXp + xpAwarded,
+        photographerXp: award.xp,
+        photographerRank: award.rank,
+        xpToNextRank: award.xpToNextRank,
         lifetimeScore: user.lifetimeScore + scoreAwarded,
-        xpToNextRank: Math.max(0, user.xpToNextRank - xpAwarded),
         photoCount: user.photoCount + 1,
       },
     });

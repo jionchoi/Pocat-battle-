@@ -116,6 +116,19 @@ export interface Photo {
   sharedToFeed: boolean;
   /** Pinned to the owner's public-profile showcase. */
   showcased: boolean;
+  /**
+   * Whether this capture appears as a sighting pin for other players.
+   *
+   * Opt-*out*, unlike the two above: the onboarding carousel tells a player their photos
+   * put sightings on the map, so the map is what they already agreed to and this switch is
+   * how they take one back.
+   *
+   * It does not control `capturedLocation`. The coordinates are recorded either way —
+   * matching a cat to the one you met last week is proximity, and a capture that forgot
+   * where it happened could not do it. What this governs is publication, and the pins other
+   * players see are coarsened regardless of it.
+   */
+  sharedToMap: boolean;
 
   /* --- the community layer --- */
 
@@ -192,6 +205,114 @@ export interface CatProfile {
   /** Distinct capture locations, for the mini map. */
   encounterLocations: GeoPoint[];
   firstEncounterAt: string;
+}
+
+/* ------------------------------------------------------------------ */
+/* Identifying a photo                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A cat the matcher thinks this photograph might be of.
+ *
+ * Deliberately not a `Cat`. A `Cat` is a cat *this player has met* — it carries their
+ * nickname, their encounter count, their best shot and who discovered it. A candidate may be
+ * an animal they have never photographed, and sending a `Cat` for one would mean sending
+ * another player's photograph and another player's id to someone who has no relationship
+ * with either.
+ *
+ * So this is the smaller shape: enough to draw a row in the "Is this Mochi?" sheet and no
+ * more. Everything owner-relative below is null or zero until `inYourDex` is true, and the
+ * server is what enforces that rather than the client remembering to check.
+ *
+ * The list is a shortlist, never an answer. Nothing here auto-assigns — the player confirms,
+ * and two cats in one house is the normal case rather than the failure case.
+ */
+export interface CatCandidate {
+  id: string;
+  /**
+   * What to call it in the sheet: this player's nickname when they have one, the cat's
+   * default when they do not. The same two-layer fallback `catNickname` uses on a photo.
+   */
+  nickname: string;
+  /**
+   * How well location and traits agree, 0..1.
+   *
+   * For ordering the list and for deciding whether to draw a "best guess" mark on the top
+   * row. It is not a claim about the animal, and the sheet must never present it as one.
+   */
+  confidence: number;
+  /**
+   * Why this cat is on the list, as short phrases the sheet renders verbatim
+   * ("seen nearby", "black and white", "notched left ear").
+   *
+   * Written server-side so the wording is not a deploy, and so precision is decided next to
+   * the data: a phrase about a cat the player has not met is never more precise about
+   * location than a map pin would be, because the shortlist must not become a way to ask
+   * where somebody else's cat lives.
+   */
+  reasons: string[];
+  /**
+   * True when this player already has a Dex entry for this cat.
+   *
+   * The difference between "Mochi" and "a cat someone else named Mochi", which is what the
+   * sheet needs to know before it says "seen 4 times" to a player who has never seen it.
+   */
+  inYourDex: boolean;
+  /**
+   * This cat's Dex tile — and null unless `inYourDex`, always.
+   *
+   * The tile is a photograph, photographs belong to whoever took them, and a candidate the
+   * player has never met has no photograph of theirs to show. The row draws a silhouette
+   * instead, which is honest: they are being asked whether they recognise the animal, not
+   * shown a picture of it.
+   */
+  thumbnailUrl: string | null;
+  /** Times *this* player has photographed it. Zero when it is not theirs yet. */
+  encounterCount: number;
+  /** When this cat was last seen by anyone. Drives "seen this week" copy. */
+  lastSeenAt: string;
+}
+
+/**
+ * The player's answer to "which cat is this?".
+ *
+ * A union rather than two optional fields, because the two branches are genuinely different
+ * requests and a body carrying both has an intent nobody can guess. `catId` attaches to a cat
+ * that already exists — theirs or anyone's. `newCat` says none of the candidates was right;
+ * its traits and its location are promoted off the photograph, which is why there is nothing
+ * else to send. The server refuses a body with both.
+ */
+export type IdentifyChoice = { catId: string } | { newCat: { nickname: string } };
+
+/**
+ * What comes back from confirming which cat a photo is of.
+ *
+ * Both objects are returned because both changed: the photo gained a `catId` and an
+ * `identifiedAt`, and the cat gained an encounter and possibly a new best shot. Returning
+ * them together is what lets the album and the Dex update from one response instead of
+ * refetching two lists to find out what the write did.
+ */
+export interface Identification {
+  photo: Photo;
+  /** The Dex entry as it now stands — created by this call when `created` is true. */
+  cat: Cat;
+  /**
+   * True when this call brought a new cat into the world rather than attaching the photo to
+   * one that already existed. The moment worth celebrating in the UI.
+   */
+  created: boolean;
+  /**
+   * The cat this photograph used to be attributed to, when this call moved it.
+   *
+   * Null on a first identification. Re-identifying is allowed on purpose — a player who
+   * picked wrong should be able to say so — and the correction is a leave-and-join, so the
+   * old entry loses an encounter and re-promotes its next-best photo.
+   *
+   * Refetch this cat rather than adjusting it locally. If the moved photograph was the only
+   * one the player had of it, the entry is gone entirely: an encounter count cannot fall to
+   * zero, and a Dex should not list an animal its owner never actually photographed.
+   */
+  releasedCatId: string | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -367,6 +488,29 @@ export interface RevealAllowance {
 }
 
 /**
+ * How full the album is.
+ *
+ * The cap does not stop the shutter. A capture at the cap is stored and scored like any
+ * other, and `overflowing` then says the player owes an answer: delete something to keep it,
+ * or discard it. The reveal is spent on either branch, so this is a question about which
+ * photograph to keep rather than about whether the score counted.
+ *
+ * `overflowing` is the server's verdict rather than a comparison the client makes, so
+ * "full" means one thing across the app.
+ */
+export interface AlbumUsage {
+  count: number;
+  /** Null on Pro, where the album is unbounded. */
+  limit: number | null;
+  overflowing: boolean;
+}
+
+/** Both quotas, as `GET /photos/allowance` answers them. */
+export interface Quotas extends RevealAllowance {
+  album: AlbumUsage;
+}
+
+/**
  * What comes back from a capture.
  *
  * `scored` is the field everything branches on. A capture beyond the allowance is stored
@@ -377,10 +521,91 @@ export interface RevealAllowance {
  * produce them exist. Carrying them as zeroes would have put a "+0 XP" on the reveal screen
  * and a cat nobody identified.
  */
+/**
+ * Why a capture came back without a score.
+ *
+ * `no_cat` is final for this photograph — the same pixels contain the same nothing on a
+ * second look, so the only useful offer is another shot. `scoring_failed` is the model or
+ * the network having a bad moment, and trying again is exactly right.
+ *
+ * `not_detected` is the phone's own verdict, reached before anything was sent anywhere. It
+ * is the only one that is *cheap to be wrong about*, because no model was paid to produce
+ * it — so it is also the only one where "score it anyway" is offered, and the on-device
+ * detector being a rough heuristic is exactly why that escape hatch has to exist.
+ *
+ * The `message` is written server-side and shown as-is. It knows things the app does not:
+ * whether the scorer timed out, was unreachable, or refused.
+ */
+export type ScoreFailureReason = 'no_cat' | 'scoring_failed' | 'not_detected';
+
+export interface ScoreFailure {
+  reason: ScoreFailureReason;
+  message: string;
+}
+
+/**
+ * What a scored photograph earned.
+ *
+ * Absent on anything that was not scored, and `null` rather than a zeroed object — a
+ * "+0 XP" under a real score reads as the capture having been worth nothing, which is why
+ * this rode off the response entirely until something existed to produce it.
+ *
+ * The totals are the ones *after* the award, so the profile meter can be drawn from this
+ * response instead of refetching. Rank is deliberately not recomputed on the client: the ramp
+ * is mirrored in both places for offline rendering, and if the two ever disagree the server's
+ * answer is the one that is true.
+ */
+export interface CaptureAward {
+  xpAwarded: number;
+  xp: number;
+  rank: number;
+  /** Set only when this photograph crossed a threshold. The moment worth celebrating. */
+  rankUp: { from: number; to: number; title: string } | null;
+  xpToNextRank: number;
+  /** True when this is the best score the player has ever reached. */
+  personalBest: boolean;
+  bestScore: number;
+}
+
 export interface ScoredCapture {
   photo: Photo;
   allowance: RevealAllowance;
   scored: boolean;
+  /**
+   * XP and rank, when this call scored something.
+   *
+   * Optional so a server without progression simply omits it and the reveal screen draws
+   * nothing — the same degrade-a-row-at-a-time rule `candidates` follows. Null is the other
+   * absence: the call ran and there was no score to pay for.
+   */
+  award?: CaptureAward | null;
+  /**
+   * Null when nothing went wrong — including on the ordinary unscored path, where the
+   * player has simply used today's allowance and the photo is waiting its turn.
+   *
+   * So `scored: false` alone does not mean failure. `scored: false` with a `scoreError` does,
+   * and that pairing is what separates the padlock from the retry sheet.
+   */
+  scoreError: ScoreFailure | null;
+  /**
+   * Read *after* this capture landed, so `album.overflowing` on the response is what raises
+   * the sheet asking the player to make room or discard.
+   */
+  album: AlbumUsage;
+  /**
+   * Cats this photograph might be of, for the sheet that opens on this screen.
+   *
+   * Rides along because this is the moment the question gets asked — a separate request the
+   * instant the reveal lands would be a second round trip for something the server already
+   * knew while it was writing the row.
+   *
+   * Optional, and absent is not empty: a server without matching omits the field and the
+   * sheet never opens, where `[]` means the matcher looked and found nobody nearby, which is
+   * the "add a new cat" prompt. Weakest on an unscored photo, where there are no traits to
+   * rank on yet and proximity is all there is — identifying does not wait for a score, and a
+   * photograph can be attached to a cat long before it is judged.
+   */
+  candidates?: CatCandidate[];
 }
 
 /* ------------------------------------------------------------------ */

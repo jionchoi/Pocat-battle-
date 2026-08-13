@@ -45,7 +45,14 @@ type Props = CompositeScreenProps<
 
 export function ProfileScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
-  const showcaseTileWidth = (width - layout.gutter * 2 - layout.gridGap) / 2;
+  /**
+   * Three across, not two.
+   *
+   * `SHOWCASE_LIMIT` is six, so this is a tidy two rows instead of three, and the strip stops
+   * dominating the profile — it is a glance at what you have been shooting, not the album.
+   * Two gaps rather than one, because three tiles have two spaces between them.
+   */
+  const showcaseTileWidth = (width - layout.gutter * 2 - layout.gridGap * 2) / 3;
 
   const user = useAuthStore((s) => s.user);
   const refreshUser = useAuthStore((s) => s.refreshUser);

@@ -39,6 +39,26 @@ const jwks = createRemoteJWKSet(new URL(config.SUPABASE_JWKS_URL));
  */
 const AUDIENCE = 'authenticated';
 
+/**
+ * Slack on the clock, in seconds.
+ *
+ * Two machines that never agreed on the time are the normal case, not the broken one: a
+ * phone's clock drifts, and the gap between a token being minted and this process deciding
+ * it has expired is measured against a clock nobody synchronised. Without tolerance a device
+ * running a minute fast sees its still-valid token rejected at the tail of its life, and the
+ * 401 says nothing about why — the message below is deliberately identical for every cause,
+ * so the failure would be invisible from both ends.
+ *
+ * A minute is far shorter than a token's lifetime, so this widens the window a stolen token
+ * stays usable by an amount that does not matter, and closes a failure that does.
+ *
+ * What this does *not* fix: a token whose `iat` is in the future. jose only checks `iat` when
+ * `maxTokenAge` is set, and we do not set it — so that skew was never rejected here. It is
+ * rejected by PostgREST, in Supabase's own process, against Supabase's clock, and no option
+ * on this call reaches it. That one is the device's clock and only the device's clock.
+ */
+const CLOCK_TOLERANCE_S = 60;
+
 export async function authenticate(req: Request, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
 
@@ -53,6 +73,7 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
     const { payload } = await jwtVerify(token, jwks, {
       issuer: config.SUPABASE_ISSUER,
       audience: AUDIENCE,
+      clockTolerance: CLOCK_TOLERANCE_S,
     });
 
     if (!payload.sub) {
@@ -75,4 +96,25 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
      */
     next(new HttpError(401, 'Invalid or expired token'));
   }
+}
+
+/**
+ * Reads a token when one is sent, and lets the request through when none is.
+ *
+ * For the ranked feed, which is public and identical for every reader — see the note on
+ * `feedApi.viral` in the client. Requiring a token there would make the response uncacheable
+ * by definition, and at scale that single header is the difference between one origin request
+ * per refresh interval and one per user.
+ *
+ * A *bad* token is still a 401. "No credentials" and "credentials that do not verify" are
+ * different statements, and quietly downgrading the second to anonymous would mean an expired
+ * session silently stops showing a reader their own reactions instead of refreshing.
+ */
+export async function optionalAuth(req: Request, res: Response, next: NextFunction) {
+  if (!req.headers.authorization) {
+    next();
+    return;
+  }
+
+  await authenticate(req, res, next);
 }

@@ -5,6 +5,7 @@ import {
   Crown,
   Diamond,
   Hexagon,
+  LockSimple,
   type IconProps,
 } from 'phosphor-react-native';
 
@@ -217,11 +218,29 @@ export const Eyebrow = React.memo(function Eyebrow({
  */
 export const ScoreChip = React.memo(function ScoreChip({
   score,
+  scored = true,
   style,
 }: {
   score: number;
+  /**
+   * False while the photograph is waiting for a score.
+   *
+   * Not a cosmetic flag. An unscored photo carries zeroes rather than absent fields — see the
+   * serializer's note on why — so a chip that trusted `score` alone drew a confident "0" on
+   * every capture beyond the day's allowance. Zero is a real score a photograph can earn, and
+   * that is exactly why it must not also be what "not judged yet" looks like.
+   */
+  scored?: boolean;
   style?: StyleProp<ViewStyle>;
 }) {
+  if (!scored) {
+    return (
+      <View accessibilityLabel="Not scored yet" style={[styles.scoreChip, style]}>
+        <LockSimple size={12} weight="fill" color={chrome.text} />
+      </View>
+    );
+  }
+
   return (
     <View
       accessibilityLabel={`Scored ${score}`}

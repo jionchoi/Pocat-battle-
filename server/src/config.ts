@@ -37,6 +37,36 @@ const envSchema = z.object({
   OPENAI_SCORING_MODEL: z.string().optional(),
 
   /*
+   * How much of the photograph the model is billed for looking at.
+   *
+   * This is the spend lever §2 asks for when it says to downsample *at the call* rather than
+   * lowering `maxPhotoWidth` again — degrading the stored photograph to save on a request is
+   * paying for it in the one place the player can see.
+   *
+   * `low` is a flat, fixed image cost regardless of the file's size, which is a far larger
+   * saving than any resize could give and needs no image library on this server. It costs
+   * fidelity, and composition is a third of the score, so it is not the default: turn it on
+   * when spend is actually the binding constraint and bump SCORING_VERSION when you do,
+   * because it changes what the model can see.
+   */
+  OPENAI_IMAGE_DETAIL: z.enum(['auto', 'low', 'high']).default('auto'),
+
+  /*
+   * Makes the stub answer "there is no cat in this".
+   *
+   * `no_cat` and `no_cat_at` have never executed — the stub hardcoded `isCat: true`, so the
+   * guard that stops a second paid look at a photograph the model already rejected has never
+   * run once. This flag is how that path gets exercised without a key and without waiting to
+   * photograph something that is not a cat.
+   *
+   * Only meaningful with SCORING_STUB on; ignored otherwise.
+   */
+  SCORING_STUB_NO_CAT: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+
+  /*
    * Invent scores locally instead of calling anybody.
    *
    * For building the capture loop end to end without a key. Deliberately a separate switch

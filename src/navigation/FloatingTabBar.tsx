@@ -117,7 +117,17 @@ export function FloatingTabBar({
   }));
 
   const openCamera = useCallback(() => {
-    navigation.navigate('MapTab', { screen: 'Capture' });
+    /*
+     * `initial: false` is load-bearing, and its absence was a trap.
+     *
+     * Navigating straight to a screen inside a stack that has not been rendered yet makes
+     * that screen the stack's *initial* route — so the map tab held `[Capture]` rather than
+     * `[Map, Capture]`, with nothing underneath to go back to. Everything downstream then
+     * misbehaved in ways that looked unrelated: the reveal could not return to the map and
+     * fell through to "that result has expired", and pressing the Map tab reopened the camera
+     * because a one-route stack has index 0 and never gets popped to its top.
+     */
+    navigation.navigate('MapTab', { screen: 'Capture', initial: false });
   }, [navigation]);
 
   // Every tab is in the bar. The album used to be a hidden fifth one, which is why it had

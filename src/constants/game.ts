@@ -57,39 +57,68 @@ export function tierFor(total: number, legendaryMin: number = LEGENDARY_BASE_MIN
 }
 
 /**
- * Capture and framing window (README section 9.1).
+ * Capture (README section 9.1).
  *
- * `windowMs` is the actual skill moment: once a cat has been stably detected the player
- * gets this long to wait for a better pose before the app shoots for them. The brief
- * calls for 3-5 seconds; 4 is the middle, and long enough that waiting feels like a
- * choice rather than a reflex.
+ * What is left is the two settings that describe the photograph itself. The framing window
+ * lived here too — a stable-detection threshold, a four-second countdown, an auto-capture at
+ * zero and a grace period so a blink did not reset it. All of it is gone with the on-device
+ * detector that fed it: the shutter is manual, so there is no window to tune.
  */
 export const CAPTURE_CONFIG = {
-  /** Frames a cat must stay in frame before the framing window opens. */
-  stableDetectionFrames: 12,
-  minDetectionConfidence: 0.6,
-  windowMs: 4000,
-  /** The window auto-captures at zero rather than losing the moment entirely. */
-  autoCaptureAtEnd: true,
   /**
-   * A detection has to drop out for this long before the window is cancelled. Without
-   * the grace period a single bad frame — a blink, a head turn — resets the countdown.
+   * The width the capture is resampled to before it is stored, in pixels.
+   *
+   * Width, not the longer edge — a portrait shot ends up taller than this and a landscape
+   * one does not, which is deliberate: cats are usually photographed upright and the
+   * orientation people actually shoot should not be the one that loses detail.
+   *
+   * This was 1280, and a modern phone shoots around 4032 across, so a capture was arriving
+   * at about a tenth of the pixels it was taken with. Nobody could see the coat texture the
+   * app is asking them to photograph. 2048 is roughly two and a half times the linear
+   * resolution and still around a megabyte and a half a shot.
+   *
+   * It is a real trade, not a free upgrade: it is the file that is uploaded on mobile data,
+   * the file that is stored, and — until the scoring call downsamples on its own side — the
+   * file the model is billed for. Lower it if uploads start to feel slow.
    */
-  detectionLostGraceMs: 700,
-  maxPhotoEdge: 1280,
+  maxPhotoWidth: 2048,
   /**
    * Pinned, not adaptive. The server's focus estimate reads compressed density, so a
    * client that varied quality per shot would vary its own composition score.
+   *
+   * Raised from 0.72, which was visibly soft on flat areas — fur and whiskers are exactly
+   * the fine, high-frequency detail that a low JPEG quality smears first, and they are what
+   * the photograph is of.
    */
-  jpegQuality: 0.72,
+  jpegQuality: 0.85,
 } as const;
 
 export const ALBUM_CONFIG = {
+  /**
+   * Mirrored by `PHOTO_LIMITS.free` in the server's game/album.ts, which is the copy that
+   * decides. This one draws the meter — and a meter drawn from a different number than the
+   * one being enforced is worse than no meter, so the two move together.
+   */
   freePhotoLimit: 200,
-  upsellThreshold: 0.85,
+  /**
+   * Where the storage warning appears — nine tenths full, the way a drive warns before it
+   * is a problem rather than at the moment it becomes one.
+   *
+   * Late enough that it is news. A warning at half full is a advertisement wearing a
+   * warning's clothes, and a player who learns to dismiss this one will dismiss the sheet
+   * at 200 too, which is the one that actually needs reading.
+   */
+  upsellThreshold: 0.9,
   showcaseLimit: 6,
-  /** Photos per album page request. */
-  pageSize: 30,
+  /**
+   * Photos per album page request.
+   *
+   * Twenty divides `freePhotoLimit` into exactly ten pages, so a free player's whole album
+   * is a bounded scroll rather than an open-ended one. Mirrored by `ALBUM_PAGE_SIZE` in the
+   * server's game/album.ts — this value is sent as `limit` on every request, so the two
+   * disagreeing means the server's copy never applies.
+   */
+  pageSize: 20,
 } as const;
 
 export const MAP_CONFIG = {

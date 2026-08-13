@@ -16,15 +16,30 @@ import { HttpError } from './errorHandler.js';
  */
 export function validate(schema: ZodType) {
   return (req: Request, _res: Response, next: NextFunction) => {
-    const parsed = schema.safeParse(req.body);
-
-    if (!parsed.success) {
-      const issues = z.flattenError(parsed.error).fieldErrors;
-      next(new HttpError(400, `That request was not valid: ${JSON.stringify(issues)}`));
-      return;
+    try {
+      req.body = parseOrThrow(schema, req.body);
+      next();
+    } catch (err) {
+      next(err);
     }
-
-    req.body = parsed.data;
-    next();
   };
+}
+
+/**
+ * The same check, callable directly.
+ *
+ * Query strings do not go through the middleware above, because `req.query` is a getter in
+ * Express 5 and assigning the parsed value back to it throws. A controller parses `req.query`
+ * with this instead and holds the result in a local — which is no worse, since a query is
+ * read in one place, and it keeps one implementation of what a validation failure looks like.
+ */
+export function parseOrThrow<T>(schema: ZodType<T>, value: unknown): T {
+  const parsed = schema.safeParse(value);
+
+  if (!parsed.success) {
+    const issues = z.flattenError(parsed.error).fieldErrors;
+    throw new HttpError(400, `That request was not valid: ${JSON.stringify(issues)}`);
+  }
+
+  return parsed.data;
 }

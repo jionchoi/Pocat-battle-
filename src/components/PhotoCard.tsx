@@ -93,6 +93,11 @@ export const PhotoCard = React.memo(function PhotoCard({
 
   const radius = variant === 'feed' ? radii.xl : radii.lg;
 
+  /** The one field that says whether `scores` and `tier` mean anything. */
+  const scored = photo.scoredAt !== null;
+  /** Empty until the player says which cat this is, which is a supported answer. */
+  const name = photo.catNickname || 'Unidentified';
+
   return (
     <Animated.View style={[animated, style]}>
       <Pressable
@@ -104,7 +109,11 @@ export const PhotoCard = React.memo(function PhotoCard({
           pressed.value = withSpring(0, press.config);
         }}
         accessibilityRole="button"
-        accessibilityLabel={`${photo.catNickname}, ${photo.tier}, scored ${photo.scores.total}`}
+        accessibilityLabel={
+          scored
+            ? `${name}, ${photo.tier}, scored ${photo.scores.total}`
+            : `${name}, not scored yet`
+        }
         style={[
           styles.card,
           { backgroundColor: c.surface, borderRadius: radius },
@@ -118,7 +127,7 @@ export const PhotoCard = React.memo(function PhotoCard({
             transition={200}
             style={StyleSheet.absoluteFill}
             accessible
-            accessibilityLabel={`Photo of ${photo.catNickname}`}
+            accessibilityLabel={`Photo of ${name}`}
           />
 
           {/* Empty-photo state. Storage may be unconfigured locally, and a card with
@@ -129,13 +138,24 @@ export const PhotoCard = React.memo(function PhotoCard({
             </View>
           ) : null}
 
-          {photo.tier === 'Legendary' ? (
+          {scored && photo.tier === 'Legendary' ? (
             <RaritySheen visible={visible} radius={radius} />
           ) : null}
 
+          {/*
+            The tier badge is withheld until there is a score, not just the number.
+
+            `tier` is filled in as 'Common' on an unscored row for the same reason `scores`
+            is filled in as zeroes — the client's type wants a value — so drawing it would
+            label every photograph waiting its turn as the worst possible outcome. The lock
+            says the honest thing, and it says it in the one corner that already means
+            "this photo's score".
+          */}
           <View style={styles.corners} pointerEvents="none">
-            <ScoreChip score={photo.scores.total} />
-            <RarityBadge rarity={photo.tier} size="sm" compact={variant === 'grid'} />
+            <ScoreChip score={photo.scores.total} scored={scored} />
+            {scored ? (
+              <RarityBadge rarity={photo.tier} size="sm" compact={variant === 'grid'} />
+            ) : null}
           </View>
         </View>
 
@@ -145,9 +165,11 @@ export const PhotoCard = React.memo(function PhotoCard({
               style={[variant === 'feed' ? text.h3 : text.caption, styles.name, { color: c.text }]}
               numberOfLines={1}
             >
-              {photo.catNickname}
+              {name}
             </Text>
-            {variant === 'feed' ? <RarityPips rarity={photo.tier} context={context} /> : null}
+            {variant === 'feed' && scored ? (
+              <RarityPips rarity={photo.tier} context={context} />
+            ) : null}
           </View>
 
           {photo.caption ? (

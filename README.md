@@ -26,40 +26,86 @@ This document is a full build brief: concept, architecture, screens, components,
 
 ## 2. Tech Stack
 
-- **Frontend**: React Native via Expo. Real-time camera frame processing (for live cat detection) requires a custom development build via expo-dev-client/EAS Build — not compatible with Expo Go, but still fully within Expo's managed workflow via config plugins.
+> **This section describes what was actually built.** It replaces an earlier draft that
+> contradicted the codebase on nine points — Expo Go compatibility, live on-device detection, an
+> ORM, RLS being unused, the client never touching the database, signed upload URLs, auth issued
+> in Node, scheduled aggregation, and a cloud Vision API. Where a decision below looks
+> surprising, `BACKEND.md` §2 has the argument for it; this is the summary, that is the reasoning.
+
+- **Frontend**: React Native via Expo, and **Expo Go runs it**. A custom dev build was needed
+  only for live camera frame processing, which no longer exists — capture is manual. `expo-camera`
+  ships inside Expo Go. A dev build is still required for the modules Expo Go warns about at
+  startup (media library, push notifications), none of which the capture loop touches.
 - **Navigation**: React Navigation (native-stack + bottom-tabs)
 - **State management**: Zustand
-- **Local persistence**: MMKV or AsyncStorage for cache; SQLite (via WatermelonDB or expo-sqlite) for offline-first photo album data
+- **Local persistence**: AsyncStorage for cache. No SQLite and no offline-first album — the album
+  is a keyset-paged read from the API.
 - **Camera/AI**:
-  - Live on-device detection: react-native-vision-camera (frame processors) + Google ML Kit's Image Labeling/Object Detection (via @infinitered/react-native-mlkit-object-detection, Expo-compatible) — detects a cat is in frame and drives the "framing window" countdown, free and offline.
-  - Server-side scoring pipeline: on photo submission, Node calls a cloud Vision API (Google Cloud Vision or AWS Rekognition) for composition signals (subject framing/position, blur/focus detection, lighting) and runs pose/action classification to detect rarity-worthy moments (mid-jump, mid-yawn, grooming, unusual sleeping position). This is also the anti-cheat checkpoint — verifies it's a genuine live-cat photo, not a spoofed image.
-  - Optional fun feature: an AI caption generator (LLM-based) suggests a funny/meme-style caption for each photo based on its detected pose/expression, editable before sharing — directly supports the "funny cat pictures" goal and boosts shareability.
-  - Phase 2: a custom-trained breed/pose classifier (fine-tuned model) to make scoring more accurate and specific than generic cloud-vision labels. Not required for MVP.
+  - **No on-device detection.** `useCatDetection`, `useFramingWindow` and the framing phase were
+    deleted: the detector was a texture-and-motion heuristic, and what it really did was make a
+    player wait several frames for permission to photograph a cat that was plainly there. **The
+    shutter is manual, and the tap is the signal** — somebody looked at the scene and decided.
+  - Scoring is **one call to a multimodal LLM** (OpenAI, strict structured output), not a cloud
+    Vision API. It returns the four score components, a pose, badges and traits in a single
+    response; the server sums the components and stamps `scoring_model` and `scoring_version` on
+    the row. There is no rule engine and no second opinion.
+  - **The rubric is a system message and the photograph is the user turn.** A photograph
+    containing text is an instruction the model may follow, and precedence is the defence.
+  - There is no anti-cheat vision checkpoint and no caption generator. Anti-cheat is spend
+    guards and the fact that scores are written once and never recomputed.
 - **Maps**: react-native-maps (Google Maps SDK / Apple Maps)
-- **Backend**: Node.js (Express or Fastify) — the app's only backend. The client never talks to the database directly; every request goes through Node.
-- **Database**: PostgreSQL, hosted on Supabase — used purely as a managed Postgres instance (connection string), accessed only from Node via an ORM (Prisma or Drizzle recommended). Supabase's auto-generated client API and Row Level Security are intentionally not used, since Node owns all data access and authorization.
-- **File storage**: Supabase Storage or a CDN-backed bucket (Cloudflare R2, S3 + CloudFront) for photos, uploaded via Node-issued short-lived signed URLs — the client never gets direct write access to storage. CDN matters more here than in a typical app since photos are the entire product.
-- **Realtime**: not required for MVP at all (no live combat, no live matchmaking) — a major simplification vs. the earlier battle-based plans. Can add lightweight push notifications for challenge results/leaderboard changes instead of a persistent socket connection.
-- **Auth**: Handled in Node — JWT issuance/verification, Google/Apple Sign-In token exchange (Apple Sign-In is mandatory if offering any other social login, per App Store rules).
-- **Push notifications**: Firebase Cloud Messaging / Expo Notifications (for "your photo won the weekly challenge," "someone voted on your shot," "a rare cat was spotted nearby," etc.)
-- **Analytics**: Amplitude or Firebase Analytics
-- **Crash/monitoring**: Sentry
-- **Hosting**: A platform that autoscales easily with minimal config changes — Railway, Render, Fly.io, or Google Cloud Run. Deploy Node stateless so scaling is "add more instances behind a load balancer," not a rewrite.
+- **Backend**: Node.js + Express 5, holding the service-role key. It is **not** the only path to
+  data — see below. Its job is everything that decides a score, a rank or who can see what.
+- **Database**: PostgreSQL on Supabase, used **as Supabase** rather than as a bare connection
+  string. There is no ORM: the server talks to PostgREST through `supabase-js`, and migrations are
+  raw dated SQL run by hand. **Row Level Security is the security model, not an unused feature** —
+  plus column grants, because RLS grants whole rows and some columns on a player's own row must
+  not be writable by them.
+- **Reads go straight to Postgres; writes that affect rank go through Node.** RLS already answers
+  "may you see this row", so putting our server in front of a read adds a hop, a second place for
+  the shape to drift, and no security. It cannot answer "what is this photograph worth", which is
+  the whole game — so that goes through the API.
+- **Auth**: **Supabase issues and rotates the session**; the app talks to it directly. Node
+  *verifies* against JWKS — the project signs with an ECC P-256 key, so there is no shared secret
+  and the server holds no signing material. The one auth action Node performs is deleting an
+  account, which needs the admin API.
+- **File storage**: a **public** Supabase Storage bucket, uploaded to **directly by the phone**.
+  Privacy rests on unguessable uuid paths, not a check at read time — the album grid would
+  otherwise mint, cache and re-mint a signed URL per thumbnail per scroll, and stable URLs are
+  what let a CDN cache anything. Writes are not public: a storage policy compares the first path
+  segment to `auth.uid()`. Rows store a `storage_path`, never a URL.
+- **Realtime**: none, and none planned.
+- **Scheduled work**: **nowhere.** Challenge status is derived from its window at read time and
+  winners are picked lazily on the first read after `ends_at`. Leaderboards are computed per
+  request. This is a whole class of infrastructure the product does not own.
+- **Push notifications**: Expo Notifications. The token column and endpoint exist; nothing sends
+  yet.
+- **Analytics / crash monitoring**: not wired up.
+- **Hosting**: undecided. The `Dockerfile` is the deploy unit. Deploy stateless.
 
 ### 2a. Why this architecture is simpler than the original battle-based plan
 
-Dropping the battle system removes the two most complex pieces from earlier drafts of this app: the live WebSocket combat/matchmaking engine and Redis-backed live queue state. What's left is almost entirely request/response: submit a photo, get a score back; vote on a photo; fetch a leaderboard. This is a much smaller, faster MVP to build, with Node's job narrowing to:
+Dropping the battle system removed the two most complex pieces from earlier drafts: the live
+WebSocket combat/matchmaking engine and Redis-backed live queue state. What is left is almost
+entirely request/response — submit a photo, get a score back; vote on a photo; fetch a
+leaderboard.
 
-- Auth & sessions
-- Photo submission handling: forwarding to the Vision API, computing the composite score, running rarity/dedup checks against the recurring-cat database, persisting the result
-- Cat Dex tracking (matching new photos to existing known cats at that location)
-- Voting/reaction handling and leaderboard aggregation (scheduled, not computed live per-request)
-- Weekly/seasonal challenge management (defining prompts, scoring submissions against them)
-- In-app purchase receipt validation with Apple/Google before granting Pro status or cosmetics
-- Push notification triggers
-- The only thing with a database connection at all
+Leaning on Supabase for the platform removed most of the rest. Node does not implement signup,
+sessions, refresh, password reset, social login, or read authorization; the database and the auth
+service do, and the server is left with the things that genuinely need a key the app must never
+hold:
 
-On scale: this is an even lighter load profile than the battle-based version, since there's no persistent live connections to maintain — a stateless Node deployment behind a load balancer, with a CDN in front of photo storage, comfortably covers early growth. Add caching for leaderboard reads and horizontal scaling only once real usage data shows where load concentrates.
+- Scoring a photograph, and rationing how often that may happen
+- Cat Dex matching — shortlisting candidates by location and trait rarity, for the player to confirm
+- Voting and impressions, because a vote moves `community_score` and `likes_received`
+- Challenges: entry, and lazy settlement
+- Friendships, because accepting one changes who can see whose feed
+- Account settings the app deliberately holds no write grant on, and deleting an account
+- In-app purchase receipt validation — **not built**, and the one endpoint that must not ship stubbed
+
+On scale: no persistent connections, a CDN in front of a public photo bucket, and reads that
+mostly do not reach Node at all. Add caching for leaderboard reads and horizontal scaling only
+once real usage shows where load concentrates.
 
 ---
 
@@ -73,8 +119,9 @@ On scale: this is an even lighter load profile than the battle-based version, si
   /screens        - one folder per screen (see Section 6)
   /navigation     - navigator setup, route definitions, deep linking config
   /store          - global state (Zustand slices)
-  /hooks          - custom hooks (useCatDetection, useLocation, useFramingWindow, etc.)
-  /services       - camera/AI frame-processor wrapper, location service, share/export service
+  /hooks          - custom hooks (useLocation, etc. — useCatDetection and useFramingWindow
+                    were deleted when capture became manual; see section 2)
+  /services       - location service, share/export service
   /models         - TypeScript types/interfaces for Photo, Cat, User, Challenge, etc. (mirrors backend types)
   /theme          - design tokens: colors, typography, spacing (see Section 5)
   /utils          - formatting, score-display helpers

@@ -37,9 +37,6 @@ type Props = CompositeScreenProps<
 
 const COLUMNS = 2;
 
-/** Title, the usage meter and the filter chips, all above the grid. */
-const HEADER_H = 150;
-
 export function PhotoAlbumGridScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
 
@@ -120,12 +117,16 @@ export function PhotoAlbumGridScreen({ navigation }: Props) {
   const loading = phase === 'loading';
   const showEmpty = phase === 'ready' && photos.length === 0;
 
+  /*
+   * No paws on this screen.
+   *
+   * `Screen` draws the walking-paw indicator whenever `refreshing` is true. The album already
+   * says it is working in two other ways — the grid keeps showing the photographs that are
+   * already there, and a pull gets the platform's own release animation — so a third signal
+   * walking across a full grid is noise. Opting out is simply not reporting the refresh.
+   */
   return (
-    <Screen
-      padded={false}
-      refreshing={phase === 'refreshing'}
-      refreshIndicatorOffset={HEADER_H}
-    >
+    <Screen padded={false}>
       <View style={styles.header}>
         <ScreenHeader
           title="Your album"
@@ -235,7 +236,7 @@ export function PhotoAlbumGridScreen({ navigation }: Props) {
               </View>
             ) : null
           }
-        />
+      />
       )}
     </Screen>
   );
@@ -248,6 +249,10 @@ const styles = StyleSheet.create({
   },
   filters: {
     marginTop: spacing.xxs,
+    // Breathing room before the grid. Without it the first row of photographs sits directly
+    // under the chips, so the filter reads as a header for that row rather than as a control
+    // over the whole album.
+    marginBottom: spacing.sm,
   },
   stale: {
     alignSelf: 'flex-start',

@@ -1,7 +1,6 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Pressable,
-  ScrollView,
   Share,
   StyleSheet,
   Switch,
@@ -9,13 +8,24 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import Animated, {
+  runOnJS,
+  useAnimatedScrollHandler,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import {
   CaretLeft,
   CaretRight,
+  Cat as CatGlyph,
   ImageBroken,
+  LockSimple,
   ShareNetwork,
 } from 'phosphor-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -26,6 +36,7 @@ import { Button } from '../../components/Button';
 import { Card, DividedGroup } from '../../components/Card';
 import { CircleButton } from '../../components/CircleButton';
 import { ConfirmSheet } from '../../components/BottomSheet';
+import { IdentifySheet } from '../../components/IdentifySheet';
 import { EmptyState } from '../../components/EmptyState';
 import { ScoreBreakdown } from '../../components/ScoreBreakdown';
 import { Screen, SectionHeader } from '../../components/Screen';
@@ -33,7 +44,7 @@ import { SkeletonBlock } from '../../components/Skeleton';
 import { TextField } from '../../components/TextField';
 import { showToast } from '../../components/Toast';
 import { VoteRow } from '../../components/VoteButton';
-import type { Photo, Reaction } from '../../models';
+import type { CatCandidate, IdentifyChoice, Photo, Quotas, Reaction } from '../../models';
 import { useAlbumStore } from '../../store/albumStore';
 import { useAuthStore } from '../../store/authStore';
 import { usePhotoReaction } from '../../hooks/usePhotoReaction';
@@ -47,6 +58,7 @@ import {
   photoScrim,
   radii,
   spacing,
+  spring,
   text,
 } from '../../theme';
 import { relativeTime } from '../../utils/format';
@@ -69,8 +81,11 @@ import { relativeTime } from '../../utils/format';
  * be checked against routes that do not exist in the stack it is actually running in.
  */
 /**
- * How far the sheet rides up over the photo. Enough to read as an overlap and to hide the
- * seam where the scrim ends; not so much that it eats the bottom of the crop.
+ * How far the title clears the sheet's top edge at its resting position.
+ *
+ * It used to be the sheet's own overlap onto the photo, back when the sheet was laid out in
+ * the scroll flow. The sheet is positioned absolutely now, so the only thing that still needs
+ * this number is the one element that has to sit above its edge without touching it.
  */
 const SHEET_OVERLAP = 18;
 
@@ -99,10 +114,13 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
   const viewerId = useAuthStore((s) => s.user?.id ?? null);
   const setCaption = useAlbumStore((s) => s.setCaption);
   const setShared = useAlbumStore((s) => s.setShared);
+  const setSharedToMap = useAlbumStore((s) => s.setSharedToMap);
   const setShowcased = useAlbumStore((s) => s.setShowcased);
   const remove = useAlbumStore((s) => s.remove);
   const pinDexPhoto = useAlbumStore((s) => s.pinDexPhoto);
   const unpinDexPhoto = useAlbumStore((s) => s.unpinDexPhoto);
+  const identifyPhoto = useAlbumStore((s) => s.identify);
+  const upsertPhoto = useAlbumStore((s) => s.upsert);
   const cats = useAlbumStore((s) => s.cats);
   const loadCatDex = useAlbumStore((s) => s.loadCatDex);
 
@@ -113,6 +131,177 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [pinningDex, setPinningDex] = useState(false);
+  const [identifyOpen, setIdentifyOpen] = useState(false);
+  const [identifying, setIdentifying] = useState(false);
+  /**
+   * The shortlist, fetched only when the sheet is asked for.
+   *
+   * Not carried on the photo and not fetched on mount: a shortlist is a ranking against cats
+   * seen near a place, it goes stale, and almost nobody who opens a photograph is about to
+   * re-identify it. `null` is "not fetched yet", which is what draws the sheet's loading
+   * state rather than an empty list.
+   */
+  const [candidates, setCandidates] = useState<CatCandidate[] | null>(null);
+  const [revealing, setRevealing] = useState(false);
+  /**
+   * The reveal allowance, fetched only for a photo that has none.
+   *
+   * `null` while unknown, which is what makes the copy below say the plain thing rather than
+   * promising a number it has not been told. The same endpoint the capture screen already
+   * asks before opening the camera.
+   */
+  const [quotas, setQuotas] = useState<Quotas | null>(null);
+
+  /* ----------------------------- the sheet ------------------------------- */
+
+  /**
+   * Three positions, and nothing in between once your finger is off it.
+   *
+   * The sheet used to settle anywhere the drag left it, which made a screen with no resting
+   * state: the photograph was always half covered by an amount the player had to choose, and
+   * choosing it was work nobody wanted to do. These are the three answers actually worth
+   * having, and every release lands on exactly one of them.
+   *
+   *   full  — the detail, floor to ceiling, scrolling inside itself
+   *   peek  — the score and its breakdown down to the bonus row, photograph above
+   *   gone  — the photograph alone
+   *
+   * Measured as `translateY` from the full-screen position, so `full` is zero and the others
+   * are how far down from it they sit.
+   */
+  const sheetTop = insets.top + spacing.xs;
+
+  const snap = useMemo(
+    () => ({
+      full: 0,
+      peek: heroHeight - sheetTop,
+      gone: windowHeight - sheetTop,
+    }),
+    [heroHeight, sheetTop, windowHeight]
+  );
+
+  type Stage = 'full' | 'peek' | 'gone';
+
+  const [stage, setStage] = useState<Stage>('peek');
+
+  const sheetY = useSharedValue(snap.peek);
+  const dragStart = useSharedValue(0);
+
+  /**
+   * Where the sheet's content is scrolled to, and whether the drag currently owns the sheet.
+   *
+   * These two are what let one continuous finger movement mean two different things without
+   * the player having to aim at a particular part of the screen. See the gesture below.
+   */
+  const scrollY = useSharedValue(0);
+  const dragOwnsSheet = useSharedValue(false);
+  /** `translationY` at the instant the drag took the sheet over, so it does not jump. */
+  const handoff = useSharedValue(0);
+
+  /**
+   * The scroll view's own gesture, named so the pan can agree to share with it.
+   *
+   * Declared as a gesture rather than reached for by ref: `simultaneousWithExternalGesture`
+   * takes either, and a ref to an `Animated.ScrollView` does not satisfy the types on both
+   * sides at once — reanimated hands back `AnimatedScrollView | null` and the gesture API
+   * wants `ComponentType | undefined`. Composing two gestures says the same thing without a
+   * cast in the middle of it.
+   */
+  const scrollGesture = useMemo(() => Gesture.Native(), []);
+
+  const onScroll = useAnimatedScrollHandler((event) => {
+    scrollY.value = event.contentOffset.y;
+  });
+
+  /**
+   * Sends the sheet to a named position from JS.
+   *
+   * The taps use this — the photograph, and the grabber itself. A drag is a fine way to move
+   * a sheet and a poor way to be the *only* way: "much easier to dismiss" means a tap on the
+   * picture does it too.
+   */
+  const goTo = useCallback(
+    (next: Stage) => {
+      sheetY.value = withSpring(snap[next], spring.soft);
+      setStage(next);
+    },
+    [sheetY, snap]
+  );
+
+  /**
+   * One drag, anywhere on the sheet.
+   *
+   * The grabber used to be the only thing that moved it, which meant a player who wanted the
+   * full detail had to notice a 4pt bar and hit it — on a screen where the obvious instinct
+   * is to push the content around. So the gesture spans the whole sheet and hands off to the
+   * scroll view rather than competing with it:
+   *
+   *   below full  — the content cannot scroll (`scrollEnabled` is off), so every drag moves
+   *                 the sheet. Up goes to full, down goes to gone.
+   *   at full     — the content scrolls normally. The drag only claims the sheet when the
+   *                 content is already at its top *and* the finger is heading down, which is
+   *                 the one moment scrolling has nothing left to do.
+   *
+   * `handoff` records the translation at that instant. Without it the sheet would jump by
+   * however far the finger had already travelled scrolling before the handover.
+   */
+  const pan = Gesture.Pan()
+    .simultaneousWithExternalGesture(scrollGesture)
+    .onBegin(() => {
+      dragStart.value = sheetY.value;
+      handoff.value = 0;
+      // Anywhere but full, the sheet is the only thing a drag can move.
+      dragOwnsSheet.value = sheetY.value > snap.full;
+    })
+    .onUpdate((event) => {
+      if (!dragOwnsSheet.value) {
+        const pullingDownAtTop = event.translationY > 0 && scrollY.value <= 0;
+        if (!pullingDownAtTop) return;
+
+        dragOwnsSheet.value = true;
+        dragStart.value = sheetY.value;
+        handoff.value = event.translationY;
+      }
+
+      const next = dragStart.value + (event.translationY - handoff.value);
+      sheetY.value = Math.min(snap.gone, Math.max(snap.full, next));
+    })
+    .onEnd((event) => {
+      // The scroll view had this one the whole way; there is nothing to snap.
+      if (!dragOwnsSheet.value) return;
+      dragOwnsSheet.value = false;
+
+      /*
+       * Where the flick was heading, not where it stopped.
+       *
+       * Projecting the release velocity forward is what makes a short fast swipe do the
+       * obvious thing. Snapping on position alone reads as the sheet arguing: you throw it
+       * downward, it has not passed the midpoint, and it climbs back up over your finger.
+       */
+      const projected = sheetY.value + event.velocityY * 0.12;
+
+      const target = (['full', 'peek', 'gone'] as Stage[]).reduce((best, name) =>
+        Math.abs(snap[name] - projected) < Math.abs(snap[best] - projected) ? name : best
+      );
+
+      sheetY.value = withSpring(snap[target], spring.soft);
+      runOnJS(setStage)(target);
+    });
+
+  const sheetStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: sheetY.value }],
+  }));
+
+  /**
+   * The title fades out as the sheet swallows it.
+   *
+   * It sits directly above the sheet's top edge and travels with it, so on the way to full
+   * screen it would slide up under the notch and sit behind the status bar. Fading it over
+   * the last stretch costs nothing and means it never collides with the clock.
+   */
+  const heroFootStyle = useAnimatedStyle(() => ({
+    opacity: Math.min(1, Math.max(0, sheetY.value / (snap.peek || 1))),
+  }));
 
   const dexEntry = photo ? cats.find((c) => c.id === photo.catId) : undefined;
   /** Pinned by hand to *this* photo — not merely the shot that happens to be winning. */
@@ -151,6 +340,31 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
       });
   }, [cached, photoId]);
 
+  /*
+   * Asked for only by a photograph that has no score.
+   *
+   * Every other visit to this screen has no use for the number, and the album is the screen
+   * a player opens most — putting an allowance request on every one of them would be a round
+   * trip per photo tap to answer a question almost nobody is asking.
+   */
+  useEffect(() => {
+    if (!photo || photo.scoredAt !== null) return;
+
+    let alive = true;
+    photoApi
+      .allowance()
+      .then((result) => {
+        if (alive) setQuotas(result);
+      })
+      .catch(() => {
+        // The button below does not depend on this; it only makes the copy vaguer.
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [photo]);
+
   const saveCaption = useCallback(async () => {
     if (!photo) return;
 
@@ -178,6 +392,19 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
       showToast('We could not change that. Try again.', 'error');
     }
   }, [photo, setShared]);
+
+  const toggleSharedToMap = useCallback(async () => {
+    if (!photo) return;
+    const next = !photo.sharedToMap;
+
+    setPhoto({ ...photo, sharedToMap: next });
+    try {
+      await setSharedToMap(photo.id, next);
+    } catch {
+      setPhoto({ ...photo, sharedToMap: !next });
+      showToast('We could not change that. Try again.', 'error');
+    }
+  }, [photo, setSharedToMap]);
 
   const toggleShowcased = useCallback(async () => {
     if (!photo) return;
@@ -222,6 +449,105 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
       setPinningDex(false);
     }
   }, [isDexPhoto, photo, pinDexPhoto, unpinDexPhoto]);
+
+  /**
+   * Opens the shortlist for this photograph.
+   *
+   * The sheet is raised first and the request runs behind it, so the player sees the thing
+   * they tapped rather than a button that appears to do nothing for a second. A failed fetch
+   * leaves `candidates` empty, which lands them on the naming step — still a useful answer,
+   * because "none of these" was always one of the two things this sheet is for.
+   */
+  const openIdentify = useCallback(async () => {
+    if (!photo) return;
+
+    setIdentifyOpen(true);
+
+    try {
+      const { candidates: found } = await photoApi.candidates(photo.id);
+      setCandidates(found);
+    } catch {
+      setCandidates([]);
+    }
+  }, [photo]);
+
+  /**
+   * Records the player's answer, first time or correcting one.
+   *
+   * Re-identifying is deliberately allowed: somebody who picked the wrong cat should be able
+   * to say so, and the server treats it as a leave-and-join. `releasedCatId` on the response
+   * is why the store refetches the Dex rather than adjusting the old entry — if this was the
+   * only photograph the player had of that cat, the entry is gone entirely.
+   */
+  const chooseCat = useCallback(
+    async (choice: IdentifyChoice) => {
+      if (!photo) return;
+
+      setIdentifying(true);
+      try {
+        const identification = await identifyPhoto(photo.id, choice);
+
+        setPhoto(identification.photo);
+        setIdentifyOpen(false);
+        setCandidates(null);
+
+        showToast(
+          identification.created
+            ? `${identification.cat.nickname} is now in your Cat Dex.`
+            : `Saved as ${identification.cat.nickname}.`,
+          'success'
+        );
+      } catch (err) {
+        showToast(
+          err instanceof Error ? err.message : 'We could not save that. Try again.',
+          'error'
+        );
+      } finally {
+        setIdentifying(false);
+      }
+    },
+    [identifyPhoto, photo]
+  );
+
+  /**
+   * Spends an allowance on a photograph that was stored without a score.
+   *
+   * The endpoint answers with the same shape a capture does, failures included: a reveal that
+   * could not reach the scorer is a 200 carrying `scoreError`, not a rejected request. Nothing
+   * was charged in that case — the ledger row is written after a score lands, never before —
+   * so it is a retry rather than a loss and the copy says so.
+   *
+   * The out-of-allowance refusal is the other outcome, and it arrives as a thrown error with
+   * the server's own message, which is written for a player to read.
+   */
+  const revealScore = useCallback(async () => {
+    if (!photo) return;
+
+    setRevealing(true);
+    try {
+      const result = await photoApi.reveal(photo.id);
+
+      await upsertPhoto(result.photo);
+      setPhoto(result.photo);
+      setQuotas((current) => (current ? { ...current, ...result.allowance } : current));
+
+      if (result.scored) {
+        showToast(`Scored ${result.photo.scores.total}.`, 'success');
+      } else {
+        showToast(
+          result.scoreError?.message ?? 'That photo could not be scored right now.',
+          result.scoreError?.reason === 'no_cat' ? 'neutral' : 'error'
+        );
+      }
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : 'We could not reach the scorer.',
+        'error'
+      );
+    } finally {
+      setRevealing(false);
+    }
+  }, [photo, upsertPhoto]);
 
   const confirmDelete = useCallback(async () => {
     if (!photo) return;
@@ -296,80 +622,171 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
   }
 
   const isMine = viewerId !== null && photo.ownerId === viewerId;
+  /** The one field that says whether `scores`, `tier` and `badges` mean anything. */
+  const scored = photo.scoredAt !== null;
 
   return (
     <View style={styles.root}>
       {/* The hero runs under the notch, so the clock has to invert to stay readable. */}
       <StatusBar style="light" />
 
-      <ScrollView
-        contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + spacing.xxxl }]}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
+      {/*
+        The photograph, fixed and full screen, behind everything else.
+
+        It used to be the first child of the scroll content at 54% height, which meant the
+        picture could never be seen whole: the only way to make the sheet go away was to
+        scroll it up, and scrolling up takes the photo with it. Pinning it here is what gives
+        the sheet something to slide *off*.
+      */}
+      <View style={styles.photoLayer}>
+        <Image
+          source={photo.imageUrl || undefined}
+          contentFit="cover"
+          transition={220}
+          style={StyleSheet.absoluteFill}
+          accessible
+          accessibilityLabel={`Photo of ${photo.catNickname}`}
+        />
+        {!photo.imageUrl ? (
+          <View style={styles.noPhoto}>
+            <Text style={[text.caption, { color: paper.textFaint }]}>No image</Text>
+          </View>
+        ) : null}
+      </View>
+
+      {/*
+        The photograph is the other control.
+
+        Tapping it drops the sheet away, and tapping it again brings it back — the same
+        gesture in both directions and no aiming required. A grabber alone made dismissing a
+        thing you had to be precise about, on the one screen whose whole point is the picture.
+      */}
+      <Pressable
+        style={[styles.photoTap, { height: stage === 'gone' ? windowHeight : heroHeight }]}
+        onPress={() => goTo(stage === 'gone' ? 'peek' : 'gone')}
+        accessibilityRole="button"
+        accessibilityLabel={
+          stage === 'gone' ? 'Show the photo details' : 'Hide the details and show the photo'
+        }
+      />
+
+      {/*
+        The scrim and the title travel with the sheet, so they leave when it does.
+
+        Both belong to the sheet rather than to the photograph: the scrim exists to make the
+        title legible, and a darkened band with no text on it is just a dirty mark on a
+        picture somebody asked to see clean.
+      */}
+      <Animated.View
+        style={[styles.heroLayer, { height: heroHeight }, sheetStyle]}
+        pointerEvents="none"
       >
-        {/*
-          Full-bleed hero at a little over half the screen. Cropping the photo to a card
-          on the one screen dedicated to that photo is the wrong instinct — this is the
-          only place in the product where the image gets to be the size it deserves.
-        */}
-        <View style={[styles.hero, { height: heroHeight }]}>
-          <Image
-            source={photo.imageUrl || undefined}
-            contentFit="cover"
-            transition={220}
-            style={StyleSheet.absoluteFill}
-            accessible
-            accessibilityLabel={`Photo of ${photo.catNickname}`}
-          />
-          {!photo.imageUrl ? (
-            <View style={styles.noPhoto}>
-              <Text style={[text.caption, { color: paper.textFaint }]}>No image</Text>
+        <LinearGradient
+          style={styles.heroScrim}
+          colors={['rgba(0, 0, 0, 0)', photoScrim.posterTop, photoScrim.posterBottom]}
+          locations={[0, 0.45, 1]}
+        />
+
+        <Animated.View style={[styles.heroFoot, heroFootStyle]}>
+          <Text style={[text.h1, styles.heroTitle]} numberOfLines={1}>
+            {photo.catNickname || 'Not identified yet'}
+          </Text>
+          {/* Withheld with the rest of the score — `tier` is a filled-in default until
+              `scoredAt` is set, and 'Common' is not a verdict anybody reached. */}
+          {scored ? <RarityBadge rarity={photo.tier} size="lg" /> : null}
+        </Animated.View>
+      </Animated.View>
+
+      {/*
+        The sheet itself: always full height, moved rather than resized.
+
+        Laying it out at its tallest and translating between the three positions is what lets
+        the same content serve all of them — the alternative is animating `height`, which
+        relayouts every child on every frame of a drag.
+      */}
+      <GestureDetector gesture={pan}>
+        <Animated.View
+          style={[
+            styles.sheet,
+            { top: sheetTop, height: windowHeight - sheetTop },
+            sheetStyle,
+          ]}
+          accessibilityHint="Swipe up for the full details, down to see the photo"
+        >
+          <View style={styles.grabberHit}>
+            <View style={styles.grabber} />
+          </View>
+
+        <GestureDetector gesture={scrollGesture}>
+        <Animated.ScrollView
+          onScroll={onScroll}
+          scrollEventThrottle={16}
+          style={styles.scrollView}
+          contentContainerStyle={styles.scroll}
+          /*
+           * Only at full height. At `peek` the sheet is showing a deliberate slice — the
+           * score and its breakdown — and letting the content scroll inside that slice would
+           * mean two ways to move the same thing, one of which leaves the sheet at a size
+           * that matches nothing.
+           */
+          scrollEnabled={stage === 'full'}
+          bounces={false}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {/*
+            The score, or the way to get one.
+
+            This screen drew `scores.total` unconditionally, and an unscored photo carries
+            zeroes — so every capture beyond the day's allowance was shown a confident "0 /
+            100 overall" and a breakdown of four zeroes. Meanwhile the reveal screen's own
+            copy told the player to "open it from your album to reveal the score", and there
+            was no control here to do it with. Both halves of that are below.
+          */}
+          {scored ? (
+            <>
+              <View style={styles.scoreRow}>
+                <Text style={[text.statLg, { color: paper.text }]}>{photo.scores.total}</Text>
+                <Text style={[text.caption, styles.scoreOutOf]}>/ 100 overall</Text>
+              </View>
+
+              <ScoreBreakdown
+                scores={photo.scores}
+                pose={photo.pose}
+                tier={photo.tier}
+                badges={photo.badges}
+                showTotal={false}
+                style={styles.breakdown}
+              />
+            </>
+          ) : (
+            <View style={styles.unscored}>
+              <View style={styles.unscoredHead}>
+                <LockSimple size={20} weight="fill" color={paper.textMuted} />
+                <Text style={[text.h3, { color: paper.text }]}>Not scored yet</Text>
+              </View>
+
+              <Text style={[text.body, { color: paper.textMuted }]}>
+                {revealHint(quotas)}
+              </Text>
+
+              {/*
+                Offered whatever the allowance says, and refused by the server rather than
+                by a disabled button. The client's copy of the allowance is a snapshot that
+                goes stale the moment the rolling window turns over — greying this out would
+                mean a player whose slot freed up two minutes ago is told they have none,
+                by a screen that has not asked since.
+              */}
+              <Button
+                label="Reveal the score"
+                onPress={() => void revealScore()}
+                loading={revealing}
+                disabled={revealing}
+                fullWidth
+                accessibilityHint="Uses one of your scores to have this photo judged"
+              />
             </View>
-          ) : null}
-
-          <View pointerEvents="none" style={styles.heroScrim} />
-
-          <View style={[styles.heroChrome, { top: insets.top + spacing.xs }]}>
-            <CircleButton
-              Glyph={CaretLeft}
-              onPress={() => navigation.goBack()}
-              accessibilityLabel="Go back"
-            />
-            <CircleButton
-              Glyph={ShareNetwork}
-              onPress={() => void share()}
-              accessibilityLabel="Share this shot"
-              glyphSize={17}
-            />
-          </View>
-
-          <View style={styles.heroFoot} pointerEvents="none">
-            <Text style={[text.h1, styles.heroTitle]} numberOfLines={1}>
-              {photo.catNickname}
-            </Text>
-            <RarityBadge rarity={photo.tier} size="lg" />
-          </View>
-        </View>
-
-        {/*
-          The sheet rides up over the photo's bottom edge. That overlap is what makes the
-          two read as one object rather than as a picture with a panel below it — and it
-          hides the seam where the scrim ends, which is otherwise a visible band.
-        */}
-        <View style={styles.sheet}>
-          <View style={styles.scoreRow}>
-            <Text style={[text.statLg, { color: paper.text }]}>{photo.scores.total}</Text>
-            <Text style={[text.caption, styles.scoreOutOf]}>/ 100 overall</Text>
-          </View>
-
-          <ScoreBreakdown
-            scores={photo.scores}
-            pose={photo.pose}
-            tier={photo.tier}
-            badges={photo.badges}
-            showTotal={false}
-            style={styles.breakdown}
-          />
+          )}
 
           {/*
             The viewer's own reaction is read from the store rather than from `photo`,
@@ -401,31 +818,78 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
             </View>
           )}
 
-          <Pressable
-            onPress={() => navigation.navigate('CatProfile', { catId: photo.catId })}
-            accessibilityRole="button"
-            accessibilityLabel={`Open ${photo.catNickname}'s Dex entry`}
-            style={styles.dexRow}
-          >
-            <View style={styles.dexThumb}>
-              <Image
-                source={photo.imageUrl || undefined}
-                contentFit="cover"
-                transition={160}
-                style={StyleSheet.absoluteFill}
-                accessible={false}
-              />
-            </View>
-            <View style={styles.rowBody}>
-              <Text style={[text.h3, { color: paper.text }]} numberOfLines={1}>
-                {`${photo.catNickname}'s Dex`}
-              </Text>
-              <Text style={[text.caption, { color: paper.textFaint }]} numberOfLines={1}>
-                {`Captured ${relativeTime(photo.capturedAt)} · ${photo.tier}`}
-              </Text>
-            </View>
-            <CaretRight size={16} color={paper.textFaint} />
-          </Pressable>
+          {/*
+            Two rows, and which one shows is whether anybody has said what this cat is.
+
+            An unidentified photograph used to render the Dex row anyway, with an empty
+            `catNickname` — so it read "'s Dex" and led to a cat profile for the empty string.
+            Nothing in the app called `identify`, so that was every photograph in the album.
+          */}
+          {photo.catId ? (
+            <Pressable
+              onPress={() => navigation.navigate('CatProfile', { catId: photo.catId })}
+              accessibilityRole="button"
+              accessibilityLabel={`Open ${photo.catNickname}'s Dex entry`}
+              style={styles.dexRow}
+            >
+              <View style={styles.dexThumb}>
+                <Image
+                  source={photo.imageUrl || undefined}
+                  contentFit="cover"
+                  transition={160}
+                  style={StyleSheet.absoluteFill}
+                  accessible={false}
+                />
+              </View>
+              <View style={styles.rowBody}>
+                <Text style={[text.h3, { color: paper.text }]} numberOfLines={1}>
+                  {`${photo.catNickname}'s Dex`}
+                </Text>
+                <Text style={[text.caption, { color: paper.textFaint }]} numberOfLines={1}>
+                  {`Captured ${relativeTime(photo.capturedAt)} · ${photo.tier}`}
+                </Text>
+              </View>
+              <CaretRight size={16} color={paper.textFaint} />
+            </Pressable>
+          ) : (
+            <Pressable
+              onPress={() => void openIdentify()}
+              accessibilityRole="button"
+              accessibilityLabel="Say which cat this is"
+              accessibilityHint="Opens a list of cats seen nearby that look like this one"
+              style={styles.dexRow}
+            >
+              <View style={[styles.dexThumb, styles.dexThumbEmpty]}>
+                <CatGlyph size={22} color={paper.textFaint} weight="duotone" />
+              </View>
+              <View style={styles.rowBody}>
+                <Text style={[text.h3, { color: paper.text }]} numberOfLines={1}>
+                  Which cat is this?
+                </Text>
+                <Text style={[text.caption, { color: paper.textFaint }]} numberOfLines={2}>
+                  Name them and they go in your Cat Dex.
+                </Text>
+              </View>
+              <CaretRight size={16} color={paper.textFaint} />
+            </Pressable>
+          )}
+
+          {/*
+            The correction, and only offered once there is something to correct.
+
+            Quiet on purpose. Getting the cat wrong is uncommon and fixing it is not what
+            anybody opened this screen to do, so it sits under the Dex row as a text button
+            rather than competing with it.
+          */}
+          {photo.catId && isMine ? (
+            <Button
+              label="Not this cat?"
+              variant="ghost"
+              onPress={() => void openIdentify()}
+              style={styles.notThisCat}
+              accessibilityHint={`Moves this photo off ${photo.catNickname} and onto another cat`}
+            />
+          ) : null}
 
           {/*
             The second scoring layer. Deliberately a separate block from the breakdown
@@ -517,6 +981,19 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
               value={photo.showcased}
               onChange={() => void toggleShowcased()}
             />
+            {/*
+              The one switch here that starts on, and the hint says what turning it off
+              does and does not do. "Off the map" is a promise about other players, not
+              about the record: the coordinates stay so the Cat Dex can still recognise
+              this cat next time, which is a thing a player would reasonably assume the
+              switch also erased.
+            */}
+            <ToggleRow
+              label="Show as a pin on the map"
+              hint="Other players see roughly where this cat was — never the exact spot. Turning this off removes the pin; the photo keeps its location for Cat Dex matching."
+              value={photo.sharedToMap}
+              onChange={() => void toggleSharedToMap()}
+            />
           </DividedGroup>
 
           {/*
@@ -524,7 +1001,14 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
             control here whose effect is somewhere else in the app. "Save to Dex" on the
             reveal screen is this same switch, and a player who pressed it there and
             wondered what moved should find the answer written out here.
+
+            Hidden entirely until the photograph has a cat. A card belongs to an animal, and
+            with no `catId` this drew "Use as 's Dex photo" and would have pinned against an
+            empty id. Declining to identify is a supported answer now, so this is a state
+            that will really happen rather than one that only existed before the sheet did.
           */}
+          {photo.catId ? (
+            <>
           <SectionHeader
             title="Cat Dex"
             description={`Your Dex keeps one card per cat. The card shows your highest-scoring photo of that cat unless you choose a different one — it does not change the cat's score, tier or Dex entry, only the picture on the card.`}
@@ -545,6 +1029,8 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
               onChange={() => void toggleDexPhoto()}
             />
           </DividedGroup>
+            </>
+          ) : null}
 
           <View style={styles.actions}>
             <Button label="Share this shot" onPress={() => void share()} trailingIcon />
@@ -555,8 +1041,37 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
               onPress={() => setConfirmingDelete(true)}
             />
           </View>
-        </View>
-      </ScrollView>
+        </Animated.ScrollView>
+        </GestureDetector>
+        </Animated.View>
+      </GestureDetector>
+
+      {/*
+        Fixed, outside the sliding sheet — they used to sit inside the hero and scroll away
+        with it, so a scrolled-down photo had no exit but the OS back gesture.
+
+        Left and right gutters, so neither of them ever meets the grabber in the middle.
+
+        The context follows what is behind them. At full height these two discs are sitting
+        on the sheet's own paper, and a light glyph blurred over a light surface is a button
+        you have to hunt for — which is the wrong thing to make hard to find, since this is
+        the only way off the screen.
+      */}
+      <View style={[styles.heroChrome, { top: insets.top + spacing.xs }]}>
+        <CircleButton
+          Glyph={CaretLeft}
+          onPress={() => navigation.goBack()}
+          accessibilityLabel="Go back"
+          context={stage === 'full' ? 'paper' : 'arena'}
+        />
+        <CircleButton
+          Glyph={ShareNetwork}
+          onPress={() => void share()}
+          accessibilityLabel="Share this shot"
+          glyphSize={17}
+          context={stage === 'full' ? 'paper' : 'arena'}
+        />
+      </View>
 
       <ConfirmSheet
         visible={confirmingDelete}
@@ -567,8 +1082,61 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
         confirmLabel={deleting ? 'Deleting' : 'Delete'}
         destructive
       />
+
+      {/*
+        Mounted only while it is open, unlike the confirm sheet above.
+
+        The shortlist is fetched when the sheet is asked for, so keeping it mounted would keep
+        a stale ranking and a half-typed name alive between visits. `candidates ?? []` is the
+        in-flight state: an empty list opens on the naming step, which is where a player who
+        genuinely has no nearby cats belongs anyway.
+      */}
+      {identifyOpen ? (
+        <IdentifySheet
+          visible
+          candidates={candidates ?? []}
+          busy={identifying || candidates === null}
+          title={photo.catId ? `Not ${photo.catNickname}?` : undefined}
+          onChoose={(choice) => void chooseCat(choice)}
+          onDismiss={() => {
+            setIdentifyOpen(false);
+            setCandidates(null);
+          }}
+        />
+      ) : null}
     </View>
   );
+}
+
+/**
+ * What to say above the reveal button.
+ *
+ * Three states and they are genuinely different promises. Unknown says the plain fact and
+ * nothing else. Slots remaining names the count, because "2 left" is what makes pressing it
+ * feel affordable. None left names a time rather than "tomorrow" — the window rolls, so there
+ * is no midnight to point at, and the clock that matters is the server's.
+ */
+function revealHint(quotas: Quotas | null): string {
+  if (!quotas || quotas.remaining === null) {
+    return 'This photo is saved but has not been judged yet. Reveal it whenever you like.';
+  }
+
+  if (quotas.remaining > 0) {
+    return quotas.remaining === 1
+      ? 'You have 1 score left today. Spend it on this photo?'
+      : `You have ${quotas.remaining} scores left today. Spend one on this photo?`;
+  }
+
+  if (!quotas.resetsAt) {
+    return 'You have used today\'s scores. This photo keeps its place until one frees up.';
+  }
+
+  const time = new Date(quotas.resetsAt).toLocaleTimeString([], {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+
+  return `You have used today's scores. Your next one unlocks around ${time}, and this photo keeps its place until then.`;
 }
 
 const ToggleRow = React.memo(function ToggleRow({
@@ -609,24 +1177,84 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: paper.bg,
   },
+  scrollView: {
+    flex: 1,
+  },
+  /**
+   * The gutters and the bottom clearance live here, not on a wrapper inside.
+   *
+   * The sheet's own background is the `Animated.View` around this, so padding on the content
+   * is padding *inside* the surface — which is what keeps the last row clear of the floating
+   * tab bar's shutter without leaving a transparent strip under it.
+   */
   scroll: {
     flexGrow: 1,
+    paddingHorizontal: layout.gutter,
+    /*
+     * Clears the fixed back and share buttons.
+     *
+     * At full height the sheet's top edge is level with them, and the score row is left
+     * aligned — so without this the first thing the sheet shows sits under the one control
+     * that leaves the screen. Reserved at every position rather than only at full, because a
+     * padding that changes on snap relayouts the content mid-spring.
+     */
+    paddingTop: spacing.lg,
+    paddingBottom: layout.tabBarClearance,
+  },
+  /**
+   * The photograph, pinned behind the sliding content.
+   *
+   * `chrome.fill` rather than the paper background: a letterboxed edge on a dark photo
+   * should read as the frame the picture sits in, not as the app showing through.
+   */
+  photoLayer: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: chrome.fill,
+  },
+  /**
+   * Only an affordance now — the whole sheet is the drag target.
+   *
+   * It stays because a sheet with no grabber does not look draggable, and the interaction is
+   * worth advertising even when nobody has to aim at it.
+   */
+  grabberHit: {
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xs,
+  },
+  grabber: {
+    width: 38,
+    height: 4,
+    borderRadius: radii.full,
+    backgroundColor: paper.hairlineHi,
   },
   gap: {
     marginTop: spacing.sm,
   },
-  hero: {
-    width: '100%',
-    backgroundColor: chrome.fill,
+  /** Pinned to the top and travelling with the sheet, so the scrim leaves when the sheet does. */
+  heroLayer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
     justifyContent: 'flex-end',
+  },
+  /** Catches taps on the picture. Grows to the whole screen once the sheet is out of the way. */
+  photoTap: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
   },
   heroScrim: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
-    height: '50%',
-    backgroundColor: photoScrim.posterBottom,
+    // Deeper than the old block so the fade has room to be invisible. The darkness at the
+    // very bottom is unchanged; what changed is that it arrives gradually.
+    height: '58%',
   },
   heroChrome: {
     position: 'absolute',
@@ -648,14 +1276,36 @@ const styles = StyleSheet.create({
     color: chrome.text,
     flexShrink: 1,
   },
+  /**
+   * Absolutely positioned and always full height, moved between the three snap points by
+   * `translateY`. Sizing it per position would relayout its whole subtree on every frame.
+   */
   sheet: {
-    flex: 1,
-    marginTop: -SHEET_OVERLAP,
-    paddingTop: spacing.lg,
-    paddingHorizontal: layout.gutter,
+    position: 'absolute',
+    left: 0,
+    right: 0,
     borderTopLeftRadius: radii.xxl,
     borderTopRightRadius: radii.xxl,
     backgroundColor: paper.bg,
+  },
+  /**
+   * The waiting state, styled as a block rather than as an error.
+   *
+   * A photograph without a score is not a failure — it is the ordinary path once somebody
+   * takes a third photo in a day — so this is a sunken panel like every other resting
+   * surface here, not a warning tint.
+   */
+  unscored: {
+    marginTop: spacing.xs,
+    padding: spacing.lg,
+    borderRadius: radii.xl,
+    backgroundColor: paper.sunken,
+    gap: spacing.sm,
+  },
+  unscoredHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
   },
   scoreRow: {
     flexDirection: 'row',
@@ -695,6 +1345,16 @@ const styles = StyleSheet.create({
     borderRadius: radii.sm,
     overflow: 'hidden',
     backgroundColor: paper.sunken,
+  },
+  /** No photograph to show, so the tile carries a glyph and has to centre it. */
+  dexThumbEmpty: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  /** Sits tight under the Dex row so the two read as one block, not two controls. */
+  notThisCat: {
+    marginTop: spacing.xxs,
+    alignSelf: 'flex-start',
   },
   rowBody: {
     flex: 1,

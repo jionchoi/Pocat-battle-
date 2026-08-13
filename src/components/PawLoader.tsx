@@ -41,7 +41,14 @@ import { icon, useReduceMotion } from '../theme';
 
 /** One full walk cycle. Slow enough to read as steps rather than as a flicker. */
 const CYCLE_MS = 1080;
-/** How far a print rises as it lands. */
+/**
+ * How far above the line a print hovers before it lands, in pixels.
+ *
+ * It travels *down* to zero, which is the opposite of what this used to do. The offset was
+ * applied as the print landed and then held for most of the cycle, so a settled trail sat
+ * three pixels above where it belonged — visible as a paw riding high inside a button, since
+ * the loader stands exactly where the label's optical centre is.
+ */
 const STEP_RISE = 3;
 
 export interface PawLoaderProps {
@@ -140,7 +147,8 @@ const Paw = React.memo(function Paw({
     return {
       opacity,
       transform: [
-        { translateY: -STEP_RISE * progress.value },
+        // Lands *on* the line rather than above it: offset at rest, zero once placed.
+        { translateY: -STEP_RISE * (1 - progress.value) },
         { rotate: `${(mirrored ? 16 : -16) * progress.value}deg` },
         { scale: 0.86 + progress.value * 0.14 },
       ],

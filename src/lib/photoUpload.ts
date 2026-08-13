@@ -1,4 +1,5 @@
-import * as ImageManipulator from 'expo-image-manipulator';
+import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
+import * as Crypto from 'expo-crypto';
 
 import { supabase } from './supabase';
 import { CAPTURE_CONFIG } from '../constants/game';
@@ -35,20 +36,33 @@ export interface UploadedPhoto {
  * Downscales the capture and puts it in the bucket.
  *
  * The resize is not only about upload time. The scoring call is billed by image size, and
- * a model judging framing, light and a coat pattern gains nothing from a 4032px original —
- * so the file that reaches storage is the file that gets scored, and both are cheaper for
- * the same reason.
+ * one file serves both purposes — what reaches storage is what gets scored, and what the
+ * album renders.
+ *
+ * That coupling is why this was set too aggressively: the number was chosen for what a model
+ * needs to judge framing and a coat pattern, and it silently decided what a person sees when
+ * they open their own photograph. Those are not the same requirement, and the player's is the
+ * higher one. If scoring cost becomes the binding constraint, downsample at the scoring call
+ * rather than here — degrading the stored photograph to save on a request is paying for it in
+ * the one place the player can see.
  */
 export async function uploadCapture(localFileUri: string, userId: string): Promise<UploadedPhoto> {
-  const processed = await ImageManipulator.manipulateAsync(
-    localFileUri,
-    [{ resize: { width: CAPTURE_CONFIG.maxPhotoEdge } }],
-    {
-      base64: true,
-      compress: CAPTURE_CONFIG.jpegQuality,
-      format: ImageManipulator.SaveFormat.JPEG,
-    }
-  );
+  /*
+   * The contextual API, not the deprecated `manipulateAsync`.
+   *
+   * Transformations are queued on the context and run on a background thread when
+   * `renderAsync` is awaited, so the resize does not block JS while a multi-megapixel
+   * capture is resampled. `saveAsync` is the step that encodes and writes the file.
+   */
+  const rendered = await ImageManipulator.manipulate(localFileUri)
+    .resize({ width: CAPTURE_CONFIG.maxPhotoWidth })
+    .renderAsync();
+
+  const processed = await rendered.saveAsync({
+    base64: true,
+    compress: CAPTURE_CONFIG.jpegQuality,
+    format: SaveFormat.JPEG,
+  });
 
   if (!processed.base64) throw new Error('We could not process that photo.');
 
@@ -62,6 +76,25 @@ export async function uploadCapture(localFileUri: string, userId: string): Promi
       // id source is broken — and silently overwriting somebody's photo is the worst
       // possible response to that.
       upsert: false,
+      /*
+       * Five minutes, and set deliberately rather than left to the platform's one hour.
+       *
+       * The content at a given path never changes — a fresh uuid per capture, no upsert —
+       * so on the merits this should cache for a year. It does not, and the reason is
+       * deletion: the bucket is public, so a cached object keeps answering requests from
+       * anyone holding the URL for as long as the edge keeps it, and "delete" has to mean
+       * gone rather than gone-in-an-hour.
+       *
+       * Five minutes is the compromise. It is long enough that scrolling an album is served
+       * from the edge rather than the origin, and short enough that a deletion is real
+       * before a player has finished being annoyed about the photo.
+       *
+       * This is a floor on exposure, not a guarantee: Supabase's Smart CDN invalidates on
+       * delete, which would make the window nil, but that is plan-dependent and not
+       * something the privacy story should quietly rest on. On a plan that does invalidate,
+       * this value can go up.
+       */
+      cacheControl: '300',
     });
 
   if (error) throw error;
@@ -92,21 +125,18 @@ function toBytes(base64: string): Uint8Array {
  * The uuid in the path, and the only thing standing between a photo and anyone who guesses
  * a URL — the bucket is public, so this has to come from a real random source rather than
  * from the clock or the account.
+ *
+ * ## Why expo-crypto and not `globalThis.crypto`
+ *
+ * There is no Web Crypto in this runtime. Hermes does not provide it, and Expo's winter
+ * polyfills cover `fetch`, `FormData`, `TextDecoder` and `URL` but deliberately not
+ * `crypto` — so `globalThis.crypto` is `undefined`, and the previous version of this
+ * function died on `Cannot read property 'getRandomValues' of undefined` at every single
+ * capture. It was written as a defensive fallback for a global that never exists here.
+ *
+ * `expo-crypto` is backed by the platform's own CSPRNG (SecRandomCopyBytes on iOS,
+ * SecureRandom on Android) and ships inside Expo Go, so it needs no native rebuild.
  */
 function randomId(): string {
-  if (typeof globalThis.crypto?.randomUUID === 'function') {
-    return globalThis.crypto.randomUUID();
-  }
-
-  // Hermes exposes getRandomValues even where randomUUID is missing. Falling back to
-  // Math.random would make paths predictable, which in a public bucket is the whole
-  // security boundary — so this throws rather than degrading quietly.
-  const bytes = new Uint8Array(16);
-  globalThis.crypto.getRandomValues(bytes);
-
-  bytes[6] = (bytes[6] & 0x0f) | 0x40;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-
-  const hex = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  return Crypto.randomUUID();
 }

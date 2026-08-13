@@ -1,223 +1,183 @@
-# Testing Cat Frame by hand
+# Testing Cat Frame
 
-## Start it
+Last rewritten: **2026-08-13**
 
-**Terminal 1** — simulator + API:
+This file used to describe a backend that was deleted on 2026-08-07. It told you to run
+`npx prisma studio`, `npm run db:seed` and `npm run curate`, to set `VISION_DEV_BYPASS`, and to
+test challenges, leaderboards, feed and shop through a seeding script. None of that existed any
+more, and `run-test.sh` — which is now deleted — was the same story in shell.
 
-```bash
-./run-test.sh                     # sightings stay in London
-./run-test.sh 37.5665 126.9780    # seed sightings in Seoul and match the simulator
-```
-
-**Terminal 2** — the app:
-
-```bash
-npm start          # then press i
-```
-
-The script boots the simulator, sets its GPS, and starts the API. That last part matters
-more than it looks: **capture requires a location.** Without one the server rejects the
-submission with `location-required`, because a photo with no coordinates cannot be matched
-to a cat or scored for rarity.
-
-To move the simulator later without restarting:
-
-```bash
-xcrun simctl location booted set 51.5074,-0.1278
-```
+What follows is what can actually be run today, and what still cannot.
 
 ---
 
-## Walk-through
+## 1. The checks that need nothing
 
-Tick these in order. Expected results are what the server actually returns, not guesses.
-
-### Onboarding
-
-- [ ] Splash animates, lands on the carousel
-- [ ] Carousel explains the capture loop before asking for **camera** — grant it
-- [ ] Next slide explains **location** before asking — grant it
-- [ ] Sign up with any email, a 10+ char password, and a username
-- [ ] Pick an avatar → lands on the Map
-
-Validation is inline under each field. Try a bad email and a 3-character password: both
-should show a message under the input, and no popup alert anywhere.
-
-### Map
-
-- [ ] Your location dot **breathes** (slow pulse)
-- [ ] Seeded sighting pins appear nearby once you have run the seed with an account
-- [ ] Toggle **Community / My photos** at the top
-- [ ] With no pins in view, a floating card says so *over* the map — the map is not replaced
-
-### The capture loop — the important one
-
-- [ ] Tap the green camera button
-- [ ] Point at anything textured — the detector needs ~12 stable frames
-- [ ] Corner brackets appear, with "Holding focus N of 12" underneath
-- [ ] Once stable, the **countdown ring wraps the shutter** and the copy changes to
-      *"Wait for a better moment"*
-- [ ] **Do nothing.** At zero it auto-captures — this is the accessibility path, and it
-      must produce a scored photo without any input
-- [ ] Repeat, and this time tap the shutter early
-- [ ] "Scoring your shot" → the reveal
-
-With `VISION_DEV_BYPASS=true` any photo is accepted and scored from stubbed signals, so a
-coffee mug works. Scores will vary run to run by design — the bypass randomises the pose
-and coat so you can exercise all four tiers.
-
-On the reveal, check:
-
-- [ ] The four score components fill **in sequence**, then the total counts up
-- [ ] The pose row is named ("Pose rarity · Mid-yawn"), not a bare number
-- [ ] Badges appear under the breakdown
-- [ ] Caption suggestions are tappable and land in the editable field
-- [ ] "New cat" badge on the first capture; the count rises on later ones
-
-Then:
-
-- [ ] Capture again **in the same spot** → the Cat Dex entry's encounter count goes up and
-      **no second cat is created**
-- [ ] Capture somewhere far away → a new cat
-
-Photos show a "No image" state because storage is not configured locally. Scoring still
-works — that is the point of separating the two.
-
-### Album and Cat Dex
-
-- [ ] Grid shows your photos, 2 across, cascading in on a stagger
-- [ ] Tier filter chips work; tapping the active chip clears it
-- [ ] Search by the cat's nickname
-- [ ] Tap a card → Photo Detail with the breakdown in its resting state (no re-animation)
-- [ ] Edit the caption and save
-- [ ] Toggle **Show in the community feed** — this is the only thing that makes a photo
-      visible to anyone else
-- [ ] Toggle **Pin to my public profile**; pin a seventh and it should refuse with a reason
-- [ ] Delete your best photo of a cat → the Cat Dex promotes your next-best, it does not
-      leave a dangling entry
-- [ ] Cat Dex → tap an entry → Cat Profile with the encounter history and a mini map
-- [ ] Rename the cat → the new name appears on every photo of it
-
-### The community layer
-
-This is the second scoring system, and it needs **two accounts** to test — one to shoot,
-one to react. Sign up a second account on a simulator or a device.
-
-- [ ] Account A: share a photo to the feed
-- [ ] Account B: open the Community feed and **let the photo sit on screen for a second**
-      — the impression only counts after ~600ms of real visibility
-- [ ] Account B: react to it
-- [ ] Account A: Photo Detail → "What people thought" now shows 1 reaction, 1 seen
-- [ ] It should say the figure is **not meaningful yet** — that is the confidence floor
-      doing its job, not a bug. A 1-view/1-vote photo is deliberately not treated as a
-      100% hit rate.
-- [ ] Account A: Profile → the "Reactions" stat rose, and rank XP moved
-- [ ] Account B: react to the same photo again → the reaction clears (toggle)
-- [ ] Account B: react, un-react, re-react a few times → the owner's XP does not spiral;
-      it is capped per photo per day
-- [ ] Leaderboard → "Best received" is the default tab; "Best shot" is a separate tab and
-      the two can rank people differently. That divergence is the design working.
-
-Check it in the database:
-
-```bash
-cd server && npx prisma studio
-```
-
-`PhotoView` should have exactly one row per (photo, viewer) no matter how much you
-scroll back and forth. `Photo.communityScore` is the smoothed ratio ×1000.
-
-To exercise the cold-start curation:
+Nine scripts, no database, no API key, no network. Each exits non-zero on failure, so they work
+in a pipeline as well as by eye.
 
 ```bash
 cd server
-npm run curate list                # least-seen shared photos
-npm run curate feature <photoId>   # rides the top of the feed for 3 days
+
+npx tsx scripts/check-scoring.ts       # the strict-output contract and the spend numbers
+npx tsx scripts/check-matching.ts      # ranking, trait rarity, the identify body
+npx tsx scripts/check-community.ts     # engagement smoothing and the ranked windows
+npx tsx scripts/check-challenges.ts    # status from a window, winners, the capture streak
+npx tsx scripts/check-progression.ts   # the rank ramp
+npx tsx scripts/check-map.ts           # bbox parsing and the coarsening grid
+npx tsx scripts/check-catdex.ts        # the Dex patch schema
+npx tsx scripts/check-shop.ts          # the catalogue's shape and what a player owns
+npx tsx scripts/check-search.ts        # ilike escaping, against a local model of the operator
 ```
 
-Featuring an unshared photo should be **refused** — it would publish something private.
+All of them at once:
 
-### Challenges and community
+```bash
+cd server && for f in scripts/check-*.ts; do npx tsx "$f" >/dev/null \
+  && echo "ok   $f" || echo "FAIL $f"; done
+```
 
-- [ ] Challenges tab shows one hero prompt, not three equal cards
-- [ ] The banner states the countdown **and** how the winner is decided
-- [ ] Enter a photo → the entry screen preselects an existing entry if you have one
-- [ ] Entering shares the photo to the feed, and the screen says so before you commit
-- [ ] Re-enter with a different photo → it *replaces*, and the hub shows "Entered"
-- [ ] Community feed lists shared photos, newest first
-- [ ] React to someone's photo; tapping the same reaction again clears it
-- [ ] Your own photos have their reaction buttons disabled
-- [ ] Leaderboard: four scopes and four metrics all switch
-- [ ] With one player, boards show a composed empty state — not a blank screen
+Two of them load `config.ts`, which validates the environment — so run them from `server/`
+where `.env` is, or pass throwaway values:
 
-### Profile
+```bash
+SUPABASE_URL=https://placeholder.supabase.co SUPABASE_SERVICE_ROLE_KEY=x SCORING_STUB=true \
+  npx tsx scripts/check-catdex.ts
+```
 
-- [ ] Rank meter shows XP progress and states that ranks unlock cosmetics only
-- [ ] Stats: photos, cats known, discovered, reactions received
-- [ ] Album-quota meter appears; the Pro upsell only shows once you pass 85% of the cap
-- [ ] Album breakdown bars match your tier distribution
-- [ ] Milestones tick as you meet them
-- [ ] Shop lists filters/frames/themes/Pro; rank-gated items show a rank, not a price
-- [ ] Settings → Privacy & Data → typing `delete` enables account deletion
+### What these deliberately do not cover
 
-### States worth forcing
+Everything that touches Postgres. The split is the one described in `BACKEND.md` §7: rules with
+no database under them live in `server/src/game/` precisely so they can be exercised like this,
+and the services around them are checked by running the thing.
 
-- [ ] **Offline:** turn off Wi-Fi, reopen the Album → cached photos still render with a
-      "Showing your last saved album" badge. The map says it is showing your last view
-      rather than going blank.
-- [ ] **Loading:** kill the API (`Ctrl-C` in terminal 1) and pull-to-refresh the Album →
-      an inline retry row, not a crash
-- [ ] **Empty:** a fresh account's Album shows "No photos yet" with a camera CTA
-- [ ] **Rejection:** set `VISION_DEV_BYPASS=false` without a Vision key, then capture →
-      "We could not score that photo right now", and your rate-limit slot is refunded
-- [ ] **Reduce motion:** turn it on in Accessibility settings → the reveal shows its end
-      state immediately and the map dot stops breathing
+### Three of them guard against drift, not bugs
+
+`check-progression`, `check-map` and `check-community` each **parse the client's
+`src/constants/game.ts` as text** and assert its constants match the server's. The rank ramp,
+the map TTL and the three community numbers are mirrored on both sides — the client needs them
+to render offline — and two copies of a constant is a thing that only stays correct if
+something checks. If one of these fails, the two halves of the app have started disagreeing.
 
 ---
 
-## Checking the database directly
+## 2. Running the server
+
+```bash
+cd server && npm install && npm run dev     # tsx watch, port 4000
+npx expo start -c                          # EXPO_PUBLIC_* is inlined at build time
+```
+
+`server/.env` needs `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SCORING_STUB=true` until
+a real key exists. The root `.env` needs `EXPO_PUBLIC_SUPABASE_URL` and
+`EXPO_PUBLIC_SUPABASE_ANON_KEY`. **Never open either file** — ask, or read `.env.example`.
+
+Use a physical device. The simulator has no camera, and the capture loop is the whole product.
+
+### Checking a route exists without a database
+
+Boot against a placeholder project. Anything mounted answers 401 without a token; anything
+unbuilt answers `not_implemented`. That distinction is worth having, because "this endpoint is
+not built" and "this endpoint is broken" look identical from the app otherwise.
 
 ```bash
 cd server
-npx prisma studio        # browser UI at localhost:5555
+SUPABASE_URL=https://placeholder.supabase.co SUPABASE_SERVICE_ROLE_KEY=x \
+  SCORING_STUB=true PORT=4099 npx tsx src/index.ts &
+
+curl -s localhost:4099/health
+curl -s localhost:4099/catdex               # {"error":{"code":"unauthenticated",...}}  mounted
+curl -s -X POST localhost:4099/shop/purchase  # {"code":"not_implemented",...}          not built
 ```
 
-Worth looking at after a few captures: `Cat` versus `CatDexEntry`. One row per real
-animal, one row per player-cat relationship. Two accounts photographing the same cat
-should share a `Cat` and have separate `CatDexEntry` rows with their own nicknames.
-
-Or straight from the API:
+`GET /feed/viral` is the one route that answers without a token — that is deliberate, so a CDN
+can cache it. Against a placeholder project it fails at the database instead, which is how you
+tell it got past auth. Against the **real** project it returns actual rows, which makes it the
+only end-to-end check of the community layer available without a device or a bearer token:
 
 ```bash
-curl -s localhost:4000/health
+curl -s "localhost:4000/feed/viral?window=all&limit=3"
 ```
 
 ---
 
-## When something looks broken
+## 3. What only a device can tell you
 
-**`P1001 Can't reach database server` on a Supabase URL.** The direct host
-(`db.<ref>.supabase.co`) is IPv6-only without the paid add-on. Use the Session pooler
-string instead — see SETUP.md section 4.1.
+These are the things no script here reaches. `BACKEND.md` §4 is the honest ledger of what has
+and has not been observed; this is what to actually do about it.
 
-**The countdown never starts.** The detector needs ~12 consecutive stable frames. Point at
-something textured — a blank wall will never trigger it.
+### The reveal-ledger refund — the most valuable test available
 
-**Capture rejected with `location-required`.** The simulator has no GPS fix. Set one:
-`xcrun simctl location booted set <lat>,<lng>`.
+The `reveals` table replaced counting `photos.scored_at`, because counting photos meant the
+count forgot: deleting a scored photo handed its reveal back, and two-a-day was unlimited for
+anyone willing to delete what they disliked. **The verification run that covered the allowance
+predates the ledger, so nothing has ever tested the code that runs today.**
 
-**Every photo scores the same.** You are probably not on the bypass. With a real Vision key
-scores reflect the actual image; with `VISION_DEV_BYPASS=true` they are randomised.
+1. Capture and score twice. The allowance should read 0 remaining.
+2. Delete one of the two scored photos.
+3. Capture again.
 
-**Two entries for the same cat.** Expected if you moved more than ~60 m between captures,
-or if the coat labels differed. The matcher biases toward creating a new record —
-splitting one cat into two entries is recoverable, merging two cats into one is not.
+It must come back **unscored**. If it scores, the ledger is not doing its job.
 
-**Everything 401s.** Access tokens last 15 minutes and the client refreshes automatically.
-If refresh fails you get bounced to sign-in, which is intended.
+### The `no_cat` path, which has never executed
 
-**Camera is black.** The simulator has no real camera; it renders a synthetic scene. The
-detector still works because it is analysing frames, not recognising real cats.
+`no_cat_at`, the guard that reads it back, and the client sheet that deliberately offers no
+retry were all written against a stub that hardcoded `isCat: true`.
 
-**API won't start.** It prints exactly which env var is wrong. Config is validated once at
-boot rather than failing later on a request.
+1. `SCORING_STUB_NO_CAT=true`, restart the server.
+2. Capture. The sheet should say there is no cat and offer **no** "try again".
+3. Turn the flag off, restart, and reveal that same photo from the album.
+
+The second attempt must be refused **without a call to the scorer** — that is the guard, and it
+is the part that has never run.
+
+### The album cap
+
+Set `PHOTO_LIMITS.free` to `2` in `server/src/game/album.ts` rather than taking 200 photographs.
+A capture at the cap is still taken and still scored; the player is then asked to delete
+something or discard it, and the reveal is spent either way.
+
+### Photo privacy
+
+```bash
+cd server && node scripts/check-photo-privacy.mjs "<imageUrl from a capture response>"
+```
+
+EXIF GPS and the cache-control header on a real uploaded object. Neither has been observed.
+
+### Cat identity, end to end
+
+Photograph the same cat twice. The first gets an empty shortlist and the naming step; the
+second should offer that cat as a candidate with reason phrases. Nothing about the matcher has
+ever been ranked against real rows — `check-matching.ts` exercises the arithmetic, not the
+queries under it.
+
+---
+
+## 4. Before the scorer goes live
+
+`SCORING_STUB=true` stamps `scoring_model = 'stub'` on every row it touches. Those numbers are
+plausible and entirely invented, and they sit in the columns the leaderboard ranks on.
+
+```bash
+cd server
+node scripts/clear-stub-scores.mjs            # report
+node scripts/clear-stub-scores.mjs --clear    # clear the scores, refund their reveals
+```
+
+It clears rather than deletes — the photographs belong to the players — and puts each row back
+into the unscored, revealable state the schema already has a shape for.
+
+---
+
+## 5. Typechecking
+
+```bash
+cd server && npx tsc --noEmit
+cd .. && npx tsc --noEmit
+```
+
+Both are clean and should stay that way. **"Typechecks" is not "works"** — most of the services
+in this codebase have never had a row pass through them, and the type system cannot tell you
+that. `BACKEND.md` §4 keeps that distinction honestly, and it is worth reading before believing
+anything is finished.

@@ -3,48 +3,34 @@ import { create } from 'zustand';
 import type { GeoPoint, ScoredCapture, SubmissionRejectionReason } from '../models';
 
 /**
- * Capture and framing-window state.
+ * Capture state.
  *
- * Deliberately ephemeral and never persisted (README section 10): this is a short-lived
- * UI interaction, not durable state. A framing window that survived an app restart would
+ * Deliberately ephemeral and never persisted (README section 10): this is a short-lived UI
+ * interaction, not durable state. A half-finished capture that survived an app restart would
  * be meaningless — the cat is gone.
  *
  * The phases map exactly to what the player sees:
  *
- *   scanning  -> camera is live, no stable detection yet
- *   framing   -> a cat is held in frame; the countdown ring is running. THE skill moment.
+ *   scanning  -> camera is live, waiting for the player to decide
  *   capturing -> shutter fired, image being processed and uploaded
  *   scoring   -> waiting on the server's verdict
  *   revealed  -> the Score Result screen owns the state
  *   rejected  -> the server declined; the reason drives the copy
+ *
+ * `scanning` no longer means the phone is looking for anything. The on-device detector, the
+ * framing window and the auto-capture that used to live between it and `capturing` are gone:
+ * the player decides when the moment is right, and the shutter is the only thing that fires.
  */
 
 export type CapturePhase =
   | 'scanning'
-  | 'framing'
   | 'capturing'
   | 'scoring'
   | 'revealed'
   | 'rejected';
 
-export interface DetectionBox {
-  /** Normalised 0-1 against the preview. */
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
 interface CaptureState {
   phase: CapturePhase;
-  /** Latest on-device detection box, for the overlay. Null when nothing is detected. */
-  box: DetectionBox | null;
-  confidence: number;
-  /** Milliseconds left in the framing window. Drives the countdown ring. */
-  remainingMs: number;
-  /** How long the player held the window before shooting — advisory telemetry only. */
-  heldMs: number;
-  autoCaptured: boolean;
   location: GeoPoint | null;
 
   /**
@@ -74,11 +60,7 @@ interface CaptureState {
   result: ScoredCapture | null;
   rejection: { reason: SubmissionRejectionReason; message: string } | null;
 
-  setDetection: (box: DetectionBox | null, confidence: number) => void;
-  beginFraming: () => void;
-  tick: (remainingMs: number) => void;
-  cancelFraming: () => void;
-  beginCapture: (auto: boolean) => void;
+  beginCapture: () => void;
   attachLocalPhoto: (uri: string) => void;
   /** Advances the submission meter. Never moves backwards within one capture. */
   advance: (progress: number) => void;
@@ -90,11 +72,6 @@ interface CaptureState {
 
 const initial = {
   phase: 'scanning' as CapturePhase,
-  box: null,
-  confidence: 0,
-  remainingMs: 0,
-  heldMs: 0,
-  autoCaptured: false,
   location: null,
   localUri: null,
   progress: 0,
@@ -123,33 +100,9 @@ export const CAPTURE_PROGRESS = {
 export const useCaptureStore = create<CaptureState>((set, get) => ({
   ...initial,
 
-  setDetection: (box, confidence) => {
-    // Detection updates are ignored once the shutter has fired: the frame is already
-    // committed, and letting a late detection move the overlay would be a lie.
-    if (get().phase !== 'scanning' && get().phase !== 'framing') return;
-    set({ box, confidence });
-  },
-
-  beginFraming: () => {
-    if (get().phase !== 'scanning') return;
-    set({ phase: 'framing', remainingMs: 0, heldMs: 0, autoCaptured: false });
-  },
-
-  tick: (remainingMs) => {
-    if (get().phase !== 'framing') return;
-    set({ remainingMs });
-  },
-
-  cancelFraming: () => {
-    if (get().phase !== 'framing') return;
-    set({ phase: 'scanning', remainingMs: 0, heldMs: 0 });
-  },
-
-  beginCapture: (auto) =>
+  beginCapture: () =>
     set({
       phase: 'capturing',
-      autoCaptured: auto,
-      box: get().box,
       localUri: null,
       progress: CAPTURE_PROGRESS.shutter,
     }),

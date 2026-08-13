@@ -75,10 +75,13 @@ interface PlayerStatsRow {
  *
  * ## About the zeroes
  *
- * `photoCount`, `catsDiscovered` and `lifetimeScore` are counted from tables that do not
- * exist yet. They are zero here rather than absent because the alternative is making them
- * optional on `Me` and teaching every screen to render a maybe-number. When the photo and
- * dex tables land, this function grows the counts and nothing above it changes.
+ * `catsDiscovered` and `lifetimeScore` are counted from work that does not exist yet. They
+ * are zero here rather than absent because the alternative is making them optional on `Me`
+ * and teaching every screen to render a maybe-number.
+ *
+ * `photoCount` used to be one of them, and was the reason the storage warning could not
+ * fire for anybody: `shouldPromptForPro` compares it against the cap, and a hard-coded zero
+ * is never near one.
  *
  * They are deliberately *not* faked from what is available — `best_score` is the highest
  * single score and `lifetimeScore` is the sum of every score, and quietly showing one as
@@ -94,6 +97,26 @@ export async function fetchMe(userId: string, email: string | null): Promise<Me>
   // PGRST116 is PostgREST's "expected one row, got none" from `.single()`.
   if (error?.code === 'PGRST116') throw new ProfileMissingError();
   if (error) throw error;
+
+  /*
+   * The album's size, as a count rather than a page of rows.
+   *
+   * `head: true` asks Postgres for the number and none of the data, which matters because
+   * this runs on every profile refresh and the thing being counted is a table that grows
+   * to hundreds of rows per player. RLS restricts it to the caller's own photos, so the
+   * `owner_id` filter is belt and braces rather than the protection.
+   *
+   * A failure here is swallowed to zero. A player must not be held out of their own
+   * profile because a storage meter could not be drawn.
+   */
+  const { count: photoCount, error: countError } = await supabase
+    .from('photos')
+    .select('id', { count: 'exact', head: true })
+    .eq('owner_id', userId);
+
+  if (countError) {
+    console.warn('[profile] could not count photos:', countError.message);
+  }
 
   const stats = Array.isArray(data.player_stats)
     ? (data.player_stats[0] ?? null)
@@ -123,10 +146,11 @@ export async function fetchMe(userId: string, email: string | null): Promise<Me>
     xpToNextRank: xpToNextRank(xp, rank),
     photoLimit: data.pro_subscription_active ? null : ALBUM_CONFIG.freePhotoLimit,
 
-    // Counted from tables that do not exist yet. See the note above.
+    photoCount: photoCount ?? 0,
+
+    // Counted from work that does not exist yet. See the note above.
     friendIds: [],
     lifetimeScore: 0,
-    photoCount: 0,
     catsDiscovered: 0,
   };
 }

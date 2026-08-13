@@ -1,0 +1,111 @@
+# Cat Frame
+
+*Working title.*
+
+**A photography game about the real cats in your neighbourhood.** You walk around, you find a cat, and you try to catch it doing something worth photographing before it wanders off. Every shot gets scored, kept in your album, and — if you want — shared. There is no combat, no pet to feed, no energy meter. The game is the shot.
+
+---
+
+## The core loop
+
+1. **Find a cat.** Open the camera. It watches the frame and tells you when it has something.
+2. **Wait.** This is the actual skill. Once the camera locks on, you get about four seconds before it shoots for you. Snapping instantly gets you a cat sitting there. Waiting might get you a yawn, a stretch, or a cat mid-jump — worth many times more. Or the cat leaves and you get nothing.
+3. **Get judged.** The photo is scored on four things: composition, how unusual the pose is, how unusual the cat is, and a bonus for everything else that makes a picture worth looking at — golden hour, rain, a cat somewhere it has no business being.
+4. **Keep it, or share it.** Every photo lands in your album. Sharing to the community feed is opt-in, always.
+
+---
+
+## Two scores, and the gap between them is the point
+
+**The instant score** is the app's own opinion, delivered the second you shoot. It is what makes capturing feel good before another human has seen the photo. Four components, summed. Above 90 is Legendary, 70 Epic, 50 Rare. There is no ceiling — a genuinely great photograph can go past 100.
+
+**The community score** is what other players think, built from reactions over time. This is the real currency: it drives your rank and the leaderboards, not the algorithm's opinion.
+
+The two are allowed to disagree, and that disagreement is the best thing in the app. A photo the algorithm rates politely but people love is the "this blew up" moment — and that is exactly the photo worth sharing.
+
+Crucially, standing is an **engagement ratio, not a raw count** — reactions divided by unique viewers, so a great photo from a small account can beat a mediocre one from a popular account. Reach is in the denominator on purpose.
+
+---
+
+## Scoring is rationed. The shutter never is.
+
+You can take as many photos as you like, always. What is limited is finding out what they are worth: **two score reveals per rolling 24 hours** on the free tier, unlimited on Pro.
+
+A photo taken past your allowance is saved whole and unscored, and you reveal it from your album whenever you have a reveal to spend. The window rolls, so there is no midnight to farm and no timezone to argue about.
+
+This is the central tension of the game. Photograph everything you see; choose carefully what you actually want judged.
+
+---
+
+## The Cat Dex
+
+Cats recur. The tabby on the corner is the same tabby next week, and the app tracks it as one animal across every encounter — your own private field guide to the cats on your street.
+
+Identifying a cat is **location, appearance, and your confirmation**. When you photograph a cat somewhere you have been before, the app shortlists the cats it already knows from that area and asks: *is this Mochi?* It never decides on its own. Asking a machine "is this the same cat" fails in both directions, and the wrong answer quietly corrupts the whole collection — so the confirmation is a feature, not a fallback.
+
+Each cat in your Dex has a nickname you chose, a short bio, an encounter count, and your best photo of it on its card.
+
+---
+
+## The map
+
+A live, crowd-sourced map of cat sightings near you — where cats have actually been seen recently, reported by the people who saw them. A sighting gets a verified badge once somebody else independently corroborates it nearby, which is what keeps the map honest.
+
+This is the retention mechanic: the map is only good because other players fill it in, and it gets better the more of them there are.
+
+---
+
+## Community, challenges, and rank
+
+**The feed** is opt-in. Photos you choose to share, browsed by other players, who can react with laugh, love or wow. There is no downvote and no dislike — the tone stays positive by construction.
+
+The feed is ordered **newest first, never by score.** Ranking by engagement would hand every remaining view to the photos that already won, which is exactly the rich-get-richer loop the ratio is designed to prevent. Score decides standing; exposure stays roughly equal.
+
+**Challenges** are rotating themed prompts — "sleepiest cat of the week", "best Halloween costume" — that you enter with a new capture or something already in your album. They close on a schedule and start clean, so an old photo cannot coast on accumulated votes forever.
+
+**Leaderboards** cover your neighbourhood, your city, everyone, and your friends, over a rolling window so the boards stay winnable.
+
+**Photographer Rank** is progression without a battle system. It is driven mostly by cumulative community reception, so the players who share get further — but capturing still pays, so someone who never posts a thing still climbs, just more slowly.
+
+---
+
+## Your album and profile
+
+Your album holds everything you have ever shot, filterable by rarity and searchable by cat name. The free tier holds 200 photos; Pro is unlimited.
+
+You can pin up to six photos to a **showcase** on your public profile — the shots you want strangers to judge you by, as opposed to the ones you happen to have taken most recently.
+
+---
+
+## How it makes money
+
+Free to play. Revenue comes from cosmetics — camera filters, frame styles, gallery themes — and a **Pro tier**: unlimited album storage, unlimited score reveals, higher-resolution exports, early access to challenges.
+
+Nothing is pay-to-win, largely because there is nothing to win. Pro buys you room and patience, not a better score. The judging is identical either way.
+
+---
+
+## What it deliberately is not
+
+- **Not a battler.** No combat, no matchmaking, no stats. That was an earlier design and cutting it removed most of the complexity from the product.
+- **Not a virtual pet.** You do not feed, raise, or care for anything. The relationship with a specific cat comes from photographing it repeatedly over months, which is how it works in real life.
+- **Not a coax minigame.** You do not lure or trap the cat. You wait, and you either get the moment or you do not.
+- **Not a social pressure machine.** Sharing is opt-in per photo. A player who never posts anything still has a complete game.
+
+---
+
+## Built with
+
+React Native and Expo, targeting iOS and Android from day one. Supabase for Postgres, auth and photo storage, with a Node/Express API that owns every decision affecting a score or a rank. Photos are judged by a vision model against a written rubric.
+
+---
+
+## Current status
+
+Honest snapshot, since this document describes the finished product and it is not finished.
+
+**Working:** signup and sign-in, the album, and the capture pipeline end to end — upload, scoring, allowance rationing, album paging and filtering, editing a photo, deleting one and repairing the Dex entry behind it.
+
+**Not yet built:** cat identification and the Dex screens, the community feed and voting, challenges, leaderboards, friends, the map's sighting endpoints, and the shop.
+
+**Known gaps:** the on-device cat detector is currently a placeholder that responds to texture and movement rather than to cats — the real one needs a custom development build that has not been made yet. Scoring runs against a stubbed judge until the vision model is connected; every stubbed score is stamped as such in the database so those rows can be found and rescored later.
