@@ -67,7 +67,7 @@ function codeForStatus(status: number): string {
  */
 export function errorHandler(
   err: Error,
-  _req: Request,
+  req: Request,
   res: Response,
   _next: NextFunction
 ) {
@@ -76,6 +76,20 @@ export function errorHandler(
     return;
   }
 
+  /*
+   * The route and the player, on the line above the stack.
+   *
+   * There is no request logging anywhere in this server, so a 500 used to leave a bare stack
+   * and nothing to say which call produced it. From a phone the player sees only "Something
+   * went wrong. Try again." — identical for every unlabelled failure in the app — so the log
+   * was the only place the two could be told apart, and it did not say either.
+   *
+   * The id and not the email: enough to find the row in `profiles`, without copying an
+   * address into a log that may end up somewhere less careful than this process.
+   */
+  console.error(
+    `${req.method} ${req.originalUrl}${req.user ? ` user=${req.user.id}` : ' anonymous'}`
+  );
   console.error(err.stack ?? err);
   res.status(500).json({
     error: { code: 'server_error', message: 'Something went wrong. Try again.' },

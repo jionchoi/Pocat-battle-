@@ -1,7 +1,8 @@
 import { Router } from 'express';
 
 import { authenticate } from '../middleware/auth.js';
-import { validate } from '../middleware/validate.js';
+import { uuidParam, validate } from '../middleware/validate.js';
+import { costlyLimit, writeLimit } from '../middleware/rateLimit.js';
 import * as photosController from '../controllers/photos.js';
 import * as votesController from '../controllers/votes.js';
 
@@ -25,6 +26,7 @@ router.get('/allowance', authenticate, photosController.allowance);
 router.post(
   '/impressions',
   authenticate,
+  writeLimit,
   validate(votesController.impressionsSchema),
   votesController.impressions
 );
@@ -33,15 +35,22 @@ router.post(
 router.post(
   '/',
   authenticate,
+  costlyLimit,
   validate(photosController.captureSchema),
   photosController.capture
 );
 
 /** Spends an allowance on a photo that was stored without a score. */
-router.post('/:photoId/reveal', authenticate, photosController.reveal);
+router.post(
+  '/:photoId/reveal',
+  authenticate,
+  costlyLimit,
+  uuidParam('photoId'),
+  photosController.reveal
+);
 
 /** One photo, for the detail screen and for a deep link into somebody's own album. */
-router.get('/:photoId', authenticate, photosController.detail);
+router.get('/:photoId', authenticate, uuidParam('photoId'), photosController.detail);
 
 /**
  * Which cat this photograph is of — the player's answer, never the matcher's.
@@ -52,17 +61,21 @@ router.get('/:photoId', authenticate, photosController.detail);
 router.post(
   '/:photoId/identify',
   authenticate,
+  writeLimit,
+  uuidParam('photoId'),
   validate(photosController.identifySchema),
   photosController.identify
 );
 
 /** The shortlist on its own, for identifying a photo from the album. */
-router.get('/:photoId/candidates', authenticate, photosController.candidates);
+router.get('/:photoId/candidates', authenticate, uuidParam('photoId'), photosController.candidates);
 
 /** Caption, share-to-feed and showcase — the three fields the player owns. */
 router.patch(
   '/:photoId',
   authenticate,
+  writeLimit,
+  uuidParam('photoId'),
   validate(photosController.updatePhotoSchema),
   photosController.update
 );
@@ -71,11 +84,19 @@ router.patch(
 router.post(
   '/:photoId/vote',
   authenticate,
+  writeLimit,
+  uuidParam('photoId'),
   validate(votesController.voteSchema),
   votesController.vote
 );
 
 /** Removes the row, the object in the bucket, and repairs any Dex entry pointing at it. */
-router.delete('/:photoId', authenticate, photosController.remove);
+router.delete(
+  '/:photoId',
+  authenticate,
+  writeLimit,
+  uuidParam('photoId'),
+  photosController.remove
+);
 
 export default router;

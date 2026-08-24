@@ -1,7 +1,8 @@
 import { Router } from 'express';
 
 import { authenticate } from '../middleware/auth.js';
-import { validate } from '../middleware/validate.js';
+import { uuidParam, validate } from '../middleware/validate.js';
+import { writeLimit } from '../middleware/rateLimit.js';
 import * as catdexController from '../controllers/catdex.js';
 
 const router = Router();
@@ -18,10 +19,12 @@ const router = Router();
  * have not photographed yourself.
  */
 router.get('/', authenticate, catdexController.list);
-router.get('/:catId', authenticate, catdexController.profile);
+router.get('/:catId', authenticate, uuidParam('catId'), catdexController.profile);
 router.patch(
   '/:catId',
   authenticate,
+  writeLimit,
+  uuidParam('catId'),
   validate(catdexController.updateCatSchema),
   catdexController.update
 );

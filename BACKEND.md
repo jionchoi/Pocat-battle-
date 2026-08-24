@@ -3,7 +3,12 @@
 Last updated: **2026-08-13**
 
 This file exists so a new session can pick the work up cold. It says what is built, what is
-only *believed* to work, why the load-bearing decisions were made, and what is left.
+only *believed* to work, and why the load-bearing decisions were made.
+
+> **What is left lives in `TODO.md`**, as of 2026-08-14. §6 below is kept because it carries the
+> *reasoning* behind each item, which a checklist cannot. If the two ever disagree, `TODO.md` is
+> the current one — and the disagreement is a bug, because two copies of a fact is precisely how
+> the migration list in §3 came to be wrong.
 
 ---
 
@@ -22,16 +27,17 @@ settings and the shop catalogue. `src/api/endpoints.ts` is the spec and the serv
 **34 of its 36 calls**. The two left — `POST /map/sightings` and `POST /shop/purchase` — are
 each unbuilt for a stated reason rather than for want of time; see §6.
 
-**And almost none of it has run.** That is the sentence that matters and it should be the first
-thing a new session takes seriously. Two migrations are written and **not applied**, so every
-vote, challenge and social endpoint currently answers a 500. The scorer is stubbed. §4 is the
-honest ledger of what has actually been observed, and it is still short — though it grew on
-2026-08-13, when `/feed/viral` returned a real row from the real database and the community
-layer stopped being a thing that only typechecked.
+**The schema is now fully applied.** All eleven migrations are on the live project as of
+2026-08-14, confirmed by `node scripts/schema-state.mjs` rather than by anybody's memory — which
+matters, because this section spent most of the project's life tracking that by hand. Trap 17 is
+closed: the privilege escalation that let any player grant themselves Pro is fixed.
 
-**One thing is urgent rather than merely undone.** Until `2026-08-13_social_and_account.sql` is
-applied, any player can grant themselves Pro with a single PostgREST call — unlimited reveals
-and an unlimited album. It is trap 17, and it is the first item in §6.
+**What has not run is the code.** That is the sentence that matters now and it should be the
+first thing a new session takes seriously. The scorer is stubbed, and §4 is the honest ledger of
+what has actually been observed — still short. It grew on 2026-08-13, when `/feed/viral`
+returned a real row and the community layer stopped being a thing that only typechecked, but
+every write path in the map, the Dex, challenges and social has still never had a row pass
+through it.
 
 ---
 
@@ -219,24 +225,24 @@ its owner never photographed. The known wrinkle: five shots in one sitting count
 | `2026-08-10_reveal_ledger.sql` | The `reveals` table, backfilled from scored photos |
 | `2026-08-12_scoring_guards.sql` | `photos.no_cat_at`, `photos.scoring_attempts` |
 | `2026-08-12_community_layer.sql` | `votes`, `photo_views`, four counters on `photos`, feed indexes, RLS |
-| `2026-08-12_challenges.sql` | `challenges`, `challenge_entries`, RLS, two seed rows — **not yet run** |
-| `2026-08-13_social_and_account.sql` | **Column grant fixing a live privilege escalation**, account settings, `friendships` — **not yet run** |
+| `2026-08-12_challenges.sql` | `challenges`, `challenge_entries`, RLS, two seed rows |
+| `2026-08-13_social_and_account.sql` | **Column grant fixing a live privilege escalation**, account settings, `friendships` |
 
-**The first nine are applied to the live project. The last two are not** — they are the only
-two in this list that have never been run, and they must go in the order listed. Every vote,
-challenge and social endpoint answers a 500 until they do — and until the second one runs,
-**any player can grant themselves Pro**.
+**All eleven are applied**, as of 2026-08-14.
 
-The community layer is applied and **observed**, not inferred: `/feed/viral` answered with a
-real row on 2026-08-13. The eight before it are inferred rather than watched — `PhotoRow` reads
-`shared_to_map`, `no_cat_at` and `scoring_attempts`, so a capture could not have succeeded on
-a device without them, and captures have.
+Do not maintain that claim by hand — it was wrong or stale for most of this project's life.
+`node scripts/schema-state.mjs` probes the live project for something each migration creates and
+prints the answer. It needs the service-role key, which is why it sits outside the `check-*.ts`
+glob.
 
-Both remaining files were read against the services that query them on 2026-08-13 and line up:
-the two FKs `challenge_entries` needs for its PostgREST embeds are declared, and the profile
-column grant covers `username` and `avatar_url`, which are the only two columns any client code
-writes to that table. Neither file is idempotent — `add constraint` has no `if not exists` — so
-run each whole, and read the error rather than re-running if one stops partway.
+One probe is doing more work than it looks like: `friendships` is created in the **third** block
+of `2026-08-13_social_and_account.sql`, after the column grant that closes trap 17. The table
+existing is therefore proof the grant ran, which is not otherwise checkable without an anon key
+and a live session.
+
+Note for any future migration: none of these files are idempotent — `add constraint` has no
+`if not exists` — so run each whole, and read the error rather than re-running if one stops
+partway.
 
 **Cat identity needed no migration.** `cats` and `cat_dex_entries` already carried every
 column it writes.
@@ -284,6 +290,7 @@ scripts/           check-photo-privacy.mjs — EXIF GPS + cache-control on an up
                    check-scoring.ts — strict-output validity + the spend numbers, 24 checks
                    check-shop.ts — catalogue shape and entitlement, 28 checks
                    check-search.ts — ilike escaping, 29 checks, models the operator
+                   schema-state.mjs — which migrations are applied; needs the key
                    clear-stub-scores.mjs — finds and undoes locally-invented scores
 ```
 
@@ -340,6 +347,10 @@ surfaced as "Something went wrong. Try again."
   than painting the local cache as freshly fetched
 - `src/components/IdentifySheet.tsx` — the "Is this Mochi?" sheet, in both contexts. Opened by
   the reveal screen after a capture and by PhotoDetail's "Which cat is this?" / "Not this cat?"
+- `src/lib/sightingClusters.ts` + `src/components/SightingStories.tsx` — captures within
+  `MAP_CONFIG.clusterRadiusM` (50m) share one paw pin with a count, opening as a story stack.
+  The radius only bites on the player's *own* pins; everybody else's arrive pre-snapped to the
+  server's 150m grid and are usually identical already
 - `src/api/endpoints.ts` + `src/models/index.ts` — the contract. **These two files are the spec.**
 
 ---
@@ -447,25 +458,23 @@ cd server && for f in scripts/check-*.ts; do npx tsx "$f" >/dev/null \
 
 ## 6. The todo list
 
+**`TODO.md` is the live action list.** This section is retained for the argument behind each
+item — a checklist can say "do not build `POST /shop/purchase`", only prose can say why doing so
+reopens trap 17 through the front door. Tick things off in `TODO.md`, not here.
+
 Every endpoint the client calls is now built except two, and each of those is unbuilt for a
-reason rather than for want of time. What is left is mostly **things only you can do**: run the
-migrations, add the key, write the rubric, hold a phone.
+reason rather than for want of time. What is left is mostly **things only you can do**: add the
+key, write the rubric, hold a phone.
 
 ---
 
-### Blocking — two migrations, in this order
-
-Nothing below matters until these are applied. Every vote, challenge and social endpoint
-answers a 500 in the meantime.
+### Blocking — nothing. The schema is done
 
 - [x] `2026-08-12_community_layer.sql` — applied, and observed answering; see §4
-- [ ] `2026-08-12_challenges.sql`
-- [ ] `2026-08-13_social_and_account.sql` — **this one is a security fix, not a feature.**
-      Until it runs, any player can set `pro_subscription_active = true` on themselves with one
-      PostgREST call. See trap 17
+- [x] `2026-08-12_challenges.sql` — applied 2026-08-14
+- [x] `2026-08-13_social_and_account.sql` — applied 2026-08-14. **Trap 17 is closed**
 
-Both were read against the services that query them on 2026-08-13 and line up. Neither is
-idempotent; §3 says what to do if one stops partway.
+Verify rather than remember: `node scripts/schema-state.mjs`.
 
 ### Then — the scorer, which is the last thing standing between this and a real game
 
@@ -578,6 +587,8 @@ The reasoning that is still load-bearing lives in §2, §8 and the code comments
 | 2026-08-13 | The `ilike` escape. Three call sites, one of them missing it; now one shared escape and the wildcards left where they are meant — trap 18 |
 | 2026-08-13 | Home location coarsened to 1km in the service, and sent once per session rather than on every GPS fix — see §2. Nothing had ever rounded it |
 | 2026-08-13 | Parked debt cleared: `isScoredNow` deleted from both serializers, README §2 and §3 rewritten to match the codebase |
+| 2026-08-14 | Sightings cluster at 50m into one paw pin, opening as a story stack — segmented bars, auto-advance, hold to pause |
+| 2026-08-14 | `scripts/schema-state.mjs`, so which migrations are applied stops being a hand-maintained claim |
 
 ## 7. Conventions
 

@@ -126,6 +126,33 @@ export const MAP_CONFIG = {
   defaultZoomDelta: 0.012,
   /** Debounce before refetching the viewport while the user is panning. */
   viewportDebounceMs: 400,
+
+  /**
+   * How close two captures have to be to share one paw pin.
+   *
+   * A doorway a cat sits in every afternoon produces a dozen photographs at the same spot, and
+   * a dozen pins stacked on one another is unreadable and untappable — you cannot pick the one
+   * you meant. One pin with a count, opening all of them, is the honest drawing of "several
+   * cats were seen here".
+   *
+   * ## 50m means more than it looks like it does
+   *
+   * Somebody else's pins are already snapped to the server's 150m grid before they are sent
+   * (`serializers/sighting.ts`), so captures near each other usually arrive with *identical*
+   * coordinates and would group at any radius at all. Where this number does real work is on
+   * the player's **own** pins, which are sent exact — 50m is a doorstep and a garden wall, and
+   * it is deliberately well under the 150m grid so it can never merge two of somebody else's
+   * cells into one pin and imply more precision than was published.
+   */
+  clusterRadiusM: 50,
+
+  /**
+   * How long each photo holds before the next one, in a stack opened from a pin.
+   *
+   * Five seconds. Long enough to actually look at a cat, short enough that a pin with eight
+   * photographs behind it does not become a commitment.
+   */
+  storySlideMs: 5_000,
 } as const;
 
 export const FEED_CONFIG = {

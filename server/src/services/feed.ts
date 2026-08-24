@@ -202,6 +202,30 @@ export async function listFeed(viewerId: string, query: FeedQuery) {
 
 type Cursor = { t: string; id: string };
 
+/*
+ * A cursor is echoed back into a PostgREST filter expression, so its parts are syntax.
+ *
+ * `decodeCursor` used to accept any two strings, and both call sites interpolate them into an
+ * `.or(...)` — `captured_at.lt."<t>",and(captured_at.eq."<t>",id.lt."<id>")`. A quote in either
+ * value closes the quoted literal and everything after it is read as more filter. The base
+ * filter on the statement (`owner_id` here, `shared_to_feed` on the feed) is a separate
+ * top-level parameter and is ANDed, so this could not reach another player's rows — but
+ * "contained by a filter somebody might later remove" is not the same as "checked".
+ *
+ * A cursor is not user input in any honest sense: it is a value this server encoded, handed
+ * out, and is being given back. So it is validated against the shapes it was minted from —
+ * a timestamp and a UUID — and neither can contain a quote.
+ */
+const CURSOR_TS_RE = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?([+-]\d{2}:?\d{2}|Z)?$/;
+const CURSOR_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isKeyset(t: unknown, id: unknown): boolean {
+  return (
+    typeof t === 'string' && CURSOR_TS_RE.test(t) &&
+    typeof id === 'string' && CURSOR_ID_RE.test(id)
+  );
+}
+
 function encodeCursor(cursor: Cursor): string {
   return Buffer.from(JSON.stringify(cursor), 'utf8').toString('base64url');
 }
@@ -209,8 +233,8 @@ function encodeCursor(cursor: Cursor): string {
 function decodeCursor(raw: string): Cursor {
   try {
     const parsed = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as Partial<Cursor>;
-    if (typeof parsed.t === 'string' && typeof parsed.id === 'string') {
-      return { t: parsed.t, id: parsed.id };
+    if (isKeyset(parsed.t, parsed.id)) {
+      return { t: parsed.t as string, id: parsed.id as string };
     }
   } catch {
     // Falls through to the same refusal as a well-formed cursor carrying the wrong shape.

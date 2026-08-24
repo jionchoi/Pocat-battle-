@@ -20,6 +20,34 @@ interface FriendshipRow {
   created_at: string;
 }
 
+/**
+ * The pair filter, with both ids proved to be UUIDs first.
+ *
+ * Every `.or()` in this file builds a PostgREST **filter expression** by interpolation, and an
+ * expression is not a value: a parenthesis or a comma in an interpolated id is syntax, not
+ * text. `unfriend` is where that mattered, because its filter is the whole WHERE clause of a
+ * `DELETE` — an id carrying `),id.not.is.null,and(requester_id.eq.` closed the group early and
+ * added a disjunct true of every row, turning "delete this friendship" into "delete the table".
+ *
+ * `uuidParam` in the route layer is the real fix and it stops this reaching here. This exists
+ * because the route layer is one file away and a later route, or a service calling a service,
+ * would not inherit it. Anything that is not a UUID by the time it is about to become filter
+ * syntax is a bug in the caller, so it throws rather than refusing politely.
+ */
+function pairFilter(a: string, b: string): string {
+  for (const id of [a, b]) {
+    if (!UUID_RE.test(id)) throw new HttpError(400, 'That is not a valid player id.');
+  }
+
+  return (
+    `and(requester_id.eq.${a},addressee_id.eq.${b}),` +
+    `and(requester_id.eq.${b},addressee_id.eq.${a})`
+  );
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+
 /** The other person in a friendship, from the point of view of whoever is asking. */
 function otherSide(row: FriendshipRow, userId: string): string {
   return row.requester_id === userId ? row.addressee_id : row.requester_id;
@@ -139,10 +167,7 @@ export async function requestFriend(userId: string, username: string) {
   const { data: existing, error: existingError } = await supabase
     .from('friendships')
     .select('*')
-    .or(
-      `and(requester_id.eq.${userId},addressee_id.eq.${target.id}),` +
-        `and(requester_id.eq.${target.id},addressee_id.eq.${userId})`
-    )
+    .or(pairFilter(userId, target.id))
     .maybeSingle<FriendshipRow>();
 
   if (existingError) throw existingError;
@@ -236,10 +261,7 @@ export async function unfriend(userId: string, otherId: string): Promise<void> {
   const { error } = await supabase
     .from('friendships')
     .delete()
-    .or(
-      `and(requester_id.eq.${userId},addressee_id.eq.${otherId}),` +
-        `and(requester_id.eq.${otherId},addressee_id.eq.${userId})`
-    );
+    .or(pairFilter(userId, otherId));
 
   if (error) throw error;
 }

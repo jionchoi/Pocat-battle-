@@ -1,7 +1,8 @@
 import { Router } from 'express';
 
 import { authenticate } from '../middleware/auth.js';
-import { validate } from '../middleware/validate.js';
+import { uuidParam, validate } from '../middleware/validate.js';
+import { socialLimit } from '../middleware/rateLimit.js';
 import * as socialController from '../controllers/social.js';
 
 /**
@@ -15,14 +16,20 @@ leaderboardRouter.get('/', authenticate, socialController.leaderboard);
 
 export const usersRouter = Router();
 /** Before `/:userId`, or "search" is matched as a user id. */
-usersRouter.get('/search', authenticate, socialController.search);
-usersRouter.get('/:userId/public-profile', authenticate, socialController.publicProfile);
+usersRouter.get('/search', authenticate, socialLimit, socialController.search);
+usersRouter.get(
+  '/:userId/public-profile',
+  authenticate,
+  uuidParam('userId'),
+  socialController.publicProfile
+);
 
 export const friendsRouter = Router();
 friendsRouter.get('/', authenticate, socialController.friends);
 friendsRouter.post(
   '/',
   authenticate,
+  socialLimit,
   validate(socialController.addFriendSchema),
   socialController.addFriend
 );
@@ -30,7 +37,14 @@ friendsRouter.post(
 friendsRouter.post(
   '/respond',
   authenticate,
+  socialLimit,
   validate(socialController.respondSchema),
   socialController.respond
 );
-friendsRouter.delete('/:userId', authenticate, socialController.unfriend);
+friendsRouter.delete(
+  '/:userId',
+  authenticate,
+  socialLimit,
+  uuidParam('userId'),
+  socialController.unfriend
+);

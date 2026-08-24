@@ -78,6 +78,42 @@ const envSchema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((value) => value === 'true'),
+
+  /*
+   * How many reverse proxies sit in front of this process.
+   *
+   * Rate limiting by address is only as honest as the address, and behind a proxy the socket
+   * belongs to the proxy — every caller looks like one client. Express fixes that by reading
+   * `X-Forwarded-For`, but that header is written by whoever is talking to you unless
+   * something in the path overwrites it.
+   *
+   * So this is a *count*, never a boolean. `app.set('trust proxy', true)` takes the leftmost
+   * value in the header, which the client supplied, so an attacker sends a fresh one per
+   * request and every per-address limit below becomes decoration. A count of 1 means "take
+   * the address one hop in", which is the entry the proxy itself appended and the caller
+   * could not forge.
+   *
+   * Default 0: trust nothing, use the socket address. Correct for local development and for
+   * any host where this process is reachable directly. Set it to the number of proxies you
+   * actually have — one for most platform hosts — and no higher. Guessing high is the
+   * failure that looks like it works.
+   */
+  TRUST_PROXY: z
+    .string()
+    .default('0')
+    .transform((value) => Number.parseInt(value, 10))
+    .refine((n) => Number.isInteger(n) && n >= 0 && n <= 10, 'TRUST_PROXY must be 0-10'),
+
+  /*
+   * Turns the limiters off. Development only — `config.ts` refuses it in production below.
+   *
+   * Exists for device testing, where one phone plus a reloading Expo client can look like a
+   * flood and the limit you hit is your own.
+   */
+  RATE_LIMIT_DISABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -99,6 +135,15 @@ const env = parsed.data;
  */
 if (env.SCORING_STUB && env.NODE_ENV === 'production') {
   console.error('SCORING_STUB cannot be enabled in production.');
+  process.exit(1);
+}
+
+/*
+ * Same argument as SCORING_STUB: a switch that exists to make local work bearable must not be
+ * the thing standing between a deployed server and whoever finds it.
+ */
+if (env.RATE_LIMIT_DISABLED && env.NODE_ENV === 'production') {
+  console.error('RATE_LIMIT_DISABLED cannot be enabled in production.');
   process.exit(1);
 }
 

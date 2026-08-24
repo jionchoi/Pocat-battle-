@@ -1,7 +1,8 @@
 import { Router } from 'express';
 
 import { authenticate } from '../middleware/auth.js';
-import { validate } from '../middleware/validate.js';
+import { uuidParam, validate } from '../middleware/validate.js';
+import { writeLimit } from '../middleware/rateLimit.js';
 import * as challengesController from '../controllers/challenges.js';
 
 const router = Router();
@@ -20,12 +21,14 @@ router.get('/active', authenticate, challengesController.active);
  */
 router.get('/eligible-photos', authenticate, challengesController.eligiblePhotos);
 
-router.get('/:challengeId/entries', authenticate, challengesController.entries);
+router.get('/:challengeId/entries', authenticate, uuidParam('challengeId'), challengesController.entries);
 
 /** Enters a photo, or moves an existing entry onto it. Also shares it to the feed. */
 router.post(
   '/:challengeId/submit',
   authenticate,
+  writeLimit,
+  uuidParam('challengeId'),
   validate(challengesController.submitSchema),
   challengesController.submit
 );
