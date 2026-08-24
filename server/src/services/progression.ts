@@ -71,6 +71,60 @@ export async function awardXp(userId: string, xp: number): Promise<Award | null>
   return credit(userId, Math.max(0, Math.round(xp)), null);
 }
 
+/**
+ * Takes back the XP a deleted photograph earned.
+ *
+ * The counterpart to `awardForScore`, and it exists because the profile kept reading
+ * "Newcomer · 59" after the photograph that scored the 59 had been deleted — the album lost
+ * the tile and the progress meter carried on as if nothing had happened.
+ *
+ * ## Two things it deliberately does not take back
+ *
+ * **Rank never falls.** `credit` assigns `Math.max(stats.rank, rankForXp(xp))` and this keeps
+ * that invariant rather than quietly becoming the one place it breaks. It is not only
+ * sentiment: `ownsEntry` in `game/shop.ts` decides cosmetic ownership by rank, so a demotion
+ * would silently repossess items a player already had on their profile. Deleting a bad photo
+ * must not cost somebody a frame they earned last week.
+ *
+ * **`best_score` never falls either**, for the reason already written on it: it is the highest
+ * score a player has ever reached, and you took that shot.
+ *
+ * The result is that XP and rank can disagree after a deletion — a player can sit at rank 3
+ * on rank-2 XP. That is intentional and it is the same shape as the retuning case the ramp
+ * already documents: the ramp says what a rank *costs to reach*, never what it costs to keep.
+ */
+export async function revokeForScore(userId: string, scoreTotal: number): Promise<void> {
+  const spent = xpForScore(scoreTotal);
+  if (spent <= 0) return;
+
+  const { data: stats, error } = await supabase
+    .from('player_stats')
+    .select('xp')
+    .eq('user_id', userId)
+    .maybeSingle<{ xp: number }>();
+
+  if (error) throw error;
+
+  /*
+   * Same reasoning as `credit`'s missing-row branch, pointed the other way: the photograph is
+   * already gone by the time this runs, so throwing here would report a failed delete for a
+   * delete that succeeded.
+   */
+  if (!stats) {
+    console.warn('[progression] no player_stats row for', userId);
+    return;
+  }
+
+  const { error: writeError } = await supabase
+    .from('player_stats')
+    // Floored, because the subtraction is only as exact as the row it reads: a score written
+    // before `xpForScore` was what it is today would otherwise drive this negative.
+    .update({ xp: Math.max(0, stats.xp - spent) })
+    .eq('user_id', userId);
+
+  if (writeError) throw writeError;
+}
+
 async function credit(
   userId: string,
   gained: number,

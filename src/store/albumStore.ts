@@ -297,7 +297,29 @@ export const useAlbumStore = create<AlbumState>((set, get) => ({
 
   remove: async (photoId) => {
     const previousPhotos = get().photos;
+    /*
+     * The count lives in the auth store, not here, and it has to move with the grid.
+     *
+     * The album meter and the Pro upsell both read `user.photoCount` — not `photos.length` —
+     * because the count is a server total and this list is one loaded page of it. So removing
+     * the tile without releasing the slot left the two disagreeing: an empty grid captioned
+     * "1 of 200". Captured photos increment it in `applyCaptureRewards`; this is the other
+     * half, and it is rolled back below on exactly the same condition the list is.
+     */
+    const previousUser = useAuthStore.getState().user;
+
+    /*
+     * The XP this photograph earned, which the server is about to take back.
+     *
+     * `xpForScore` on the server is `Math.round(scoreTotal)`, so the score *is* the XP and
+     * this needs no formula of its own. Unscored photos credited nothing and revoke nothing —
+     * `scoredAt` is the field that says which, exactly as it does everywhere else.
+     */
+    const doomed = previousPhotos.find((p) => p.id === photoId);
+    const xpRevoked = doomed?.scoredAt ? doomed.scores.total : 0;
+
     set({ photos: previousPhotos.filter((p) => p.id !== photoId) });
+    useAuthStore.getState().releaseDeletedPhoto({ xpRevoked });
 
     try {
       await photoApi.remove(photoId);
@@ -306,8 +328,19 @@ export const useAlbumStore = create<AlbumState>((set, get) => ({
       // refetched rather than patched — guessing the new best shot here would be wrong
       // exactly when it matters.
       void get().loadCatDex();
+      /*
+       * The optimistic arithmetic above is a guess at what the server did; this is what it
+       * actually did. It also repairs the case the guess cannot cover — rank, and a photo
+       * deleted on another device — without making the player wait to see the tile go.
+       */
+      void useAuthStore.getState().refreshUser();
     } catch (err) {
       set({ photos: previousPhotos });
+
+      // Restored wholesale rather than added back field by field, so a refreshUser that
+      // landed mid-request is not undone by re-incrementing stale numbers.
+      if (previousUser) useAuthStore.setState({ user: previousUser });
+
       throw err;
     }
   },

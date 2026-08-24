@@ -49,7 +49,13 @@ router.post(
   photosController.reveal
 );
 
-/** One photo, for the detail screen and for a deep link into somebody's own album. */
+/**
+ * One photo, for the detail screen.
+ *
+ * Answers for two readers: the owner, who gets the album serialization, and anyone else, who
+ * gets the feed one — every card in the viral feed opens this screen. See the service; the
+ * difference between the two is `capturedLocation`.
+ */
 router.get('/:photoId', authenticate, uuidParam('photoId'), photosController.detail);
 
 /**

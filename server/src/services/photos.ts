@@ -10,10 +10,11 @@ import {
 } from '../game/scoring.js';
 import { PHOTO_LIMITS, SHOWCASE_LIMIT } from '../game/album.js';
 import { serializePhoto, type PhotoRow } from '../serializers/photo.js';
-import { awardForScore } from './progression.js';
+import { awardForScore, revokeForScore } from './progression.js';
 import { nicknamesFor } from './catNames.js';
 import { promoteBestPhoto } from './catDex.js';
 import { candidatesFor, type CatCandidate } from './catMatching.js';
+import { assembleFeedCards } from './feed.js';
 
 /**
  * The capture loop.
@@ -444,9 +445,50 @@ async function nicknameOf(userId: string, row: PhotoRow): Promise<string | null>
   return (await nicknamesFor(userId, [row.cat_id])).get(row.cat_id) ?? null;
 }
 
+/**
+ * One photograph, for whoever is allowed to see it.
+ *
+ * Two readers, not one, and that is the whole shape of this function. It used to call
+ * `ownedPhoto` and nothing else, which meant every photo opened from the viral feed answered
+ * 404 — the feed is other people's photographs by definition, so the detail screen showed
+ * "This photo has moved on" for every card on it while the card itself stayed perfectly
+ * visible behind the back gesture. The endpoint was built for a deep link into your own
+ * album and the client mounts the same screen in the home stack.
+ *
+ * A stranger gets the **feed** serialization, not the album one. That is not a formality:
+ * `serializePhoto` emits `capturedLocation` as the true coordinates, and handing those to
+ * anyone who can guess a photo id would undo the map's coarsening by a far easier route than
+ * the map — no bounding box, no span limit, one request per id. `serializeFeedPhoto` sends
+ * zeroes, and `assembleFeedCards` is reused rather than reimplemented so this can never
+ * drift from what the feed itself already publishes.
+ *
+ * `shared_to_feed` is the permission. A photo the owner never published is 404 to everybody
+ * else — the same answer as a photo that does not exist, deliberately, because
+ * distinguishing them would confirm the id belongs to something real.
+ */
 export async function detail(userId: string, photoId: string) {
-  const row = await ownedPhoto(userId, photoId);
-  return { photo: serializePhoto(row, await nicknameOf(userId, row)) };
+  const { data, error } = await supabase
+    .from('photos')
+    .select('*')
+    .eq('id', photoId)
+    .maybeSingle<PhotoRow>();
+
+  if (error) throw error;
+
+  /*
+   * One message for "no such photo" and for "not yours and not published". See above: a
+   * distinct 403 would tell a caller which ids exist.
+   */
+  if (!data || (data.owner_id !== userId && !data.shared_to_feed)) {
+    throw new HttpError(404, 'That photo is not available.');
+  }
+
+  if (data.owner_id === userId) {
+    return { photo: serializePhoto(data, await nicknameOf(userId, data)) };
+  }
+
+  const [card] = await assembleFeedCards([data], userId);
+  return { photo: card };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -609,6 +651,19 @@ export async function remove(userId: string, photoId: string) {
   if (deleteError) throw deleteError;
 
   await deletePhotoObject(row.storage_path);
+
+  /*
+   * The XP this photograph earned goes with it.
+   *
+   * Only for a photo that was actually scored — an unscored row never credited anything, and
+   * `score_total` is null on it. Done after the delete rather than before, so a failed delete
+   * cannot cost a player XP for a photograph they still have.
+   *
+   * Rank and `best_score` are deliberately left alone. See `revokeForScore`.
+   */
+  if (row.score_total !== null) {
+    await revokeForScore(userId, row.score_total);
+  }
 
   for (const entry of entries ?? []) {
     // The photograph that was this cat's tile no longer exists, so the pin the player set by

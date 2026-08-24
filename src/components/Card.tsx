@@ -101,7 +101,21 @@ export const DividedGroup = React.memo(function DividedGroup({
           style={
             index === 0
               ? undefined
-              : { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.hairline }
+              : /*
+                 * `hairlineHi`, not `hairline`, and the difference is whether this is visible
+                 * at all.
+                 *
+                 * `hairline` is #F0F0F1 — about a four percent step off the white card it is
+                 * drawn on, at a width of one physical pixel. The divider was rendering
+                 * correctly and nobody could see it: the Privacy and location card read as one
+                 * undivided block with two tappable halves. `hairlineHi` (#E3E3E6) is the token
+                 * the palette already carries for a line that has to separate rather than
+                 * merely suggest, which is exactly this job.
+                 *
+                 * `hairline` keeps its place bounding a card against the page, where the two
+                 * surfaces differ anyway and the line only has to stop the edge looking soft.
+                 */
+                { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.hairlineHi }
           }
         >
           {child}

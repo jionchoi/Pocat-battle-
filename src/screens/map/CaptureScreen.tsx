@@ -5,6 +5,7 @@ import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/n
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { CaptureOverlay } from '../../components/CaptureOverlay';
+import { CaptureFilterLayer } from '../../components/CaptureFilterLayer';
 import { ScoringOverlay } from '../../components/ScoringOverlay';
 import { Button } from '../../components/Button';
 import { showToast } from '../../components/Toast';
@@ -16,6 +17,7 @@ import { uploadCapture } from '../../lib/photoUpload';
 import { useAlbumStore } from '../../store/albumStore';
 import { useAuthStore } from '../../store/authStore';
 import { CAPTURE_PROGRESS, useCaptureStore } from '../../store/captureStore';
+import { DEFAULT_FILTER_ID } from '../../constants/filters';
 import { arena, radii, spacing, text } from '../../theme';
 import type { MapStackParamList } from '../../navigation/types';
 
@@ -40,6 +42,19 @@ type Nav = NativeStackNavigationProp<MapStackParamList, 'Capture'>;
 export function CaptureScreen() {
   const navigation = useNavigation<Nav>();
   const camera = useRef<CameraView | null>(null);
+
+  /**
+   * The chosen look, held here rather than in the overlay.
+   *
+   * The overlay unmounts the moment the shutter fires — the scoring overlay replaces it — so
+   * a selection living inside it would reset to Natural on every shot. It is deliberately
+   * *not* in `captureStore` either: that store is the state of one capture in flight, and
+   * this outlives a capture without being part of one.
+   *
+   * Preview-only, and never sent anywhere. Nothing downstream of the shutter reads it: the
+   * uploaded bytes are the camera's own frame. See `constants/filters.ts`.
+   */
+  const [filterId, setFilterId] = useState<string>(DEFAULT_FILTER_ID);
 
   const cameraPermission = useCameraPermission();
   const { permission: locationPermission, position, request: requestLocation } =
@@ -75,6 +90,29 @@ export function CaptureScreen() {
   const userId = useAuthStore((s) => s.session?.user?.id ?? null);
 
   const [ready, setReady] = useState(false);
+
+  /**
+   * Which of the sensor's capture resolutions to actually use.
+   *
+   * `undefined` until the camera has been asked what it supports, which is what makes this a
+   * fix rather than a guess: sizes are per-device and per-lens, so there is no constant to
+   * hardcode.
+   *
+   * **This is why photographs looked soft.** With the prop unset, expo-camera picks a default
+   * capture size, and on Android that default is routinely a mid-tier preview-grade resolution
+   * rather than the sensor's full still size — so the pipeline was downscaling 2048px from a
+   * source that was sometimes barely wider than that, and every later stage was working from
+   * an image the hardware never needed to give up. The same phone in its own camera app uses
+   * the full size, which is exactly the comparison that made this look like a bug in the app.
+   */
+  const [pictureSize, setPictureSize] = useState<string | undefined>(undefined);
+
+  /**
+   * Latched, because setting `pictureSize` reconfigures the capture session and fires
+   * `onCameraReady` again. Without this the screen would ask, set, re-ready, ask again —
+   * a reconfiguration loop on the one screen that has to be live and responsive.
+   */
+  const sizeChosen = useRef(false);
 
   /**
    * Whether this screen is the one being looked at.
@@ -332,6 +370,27 @@ export function CaptureScreen() {
     );
   }
 
+  /**
+   * Asks the camera what it can shoot, and takes the biggest.
+   *
+   * Runs once per mount, after the session is live — the list is not available before then.
+   * Failure is non-fatal on purpose: an unset `pictureSize` is exactly the state this screen
+   * was in before, so the worst case is the old behaviour rather than a camera that will not
+   * open. A capture is never blocked on this.
+   */
+  const chooseLargestPictureSize = useCallback(async () => {
+    if (sizeChosen.current) return;
+    sizeChosen.current = true;
+
+    try {
+      const sizes = await camera.current?.getAvailablePictureSizesAsync();
+      const best = largestPictureSize(sizes ?? []);
+      if (best) setPictureSize(best);
+    } catch {
+      // Left unset. See above — this degrades to the previous behaviour, not to a failure.
+    }
+  }, []);
+
   /* -------------------------------- camera -------------------------------- */
 
   /** Shutter fired, verdict not yet on screen. `revealed` is the ring's closing frame. */
@@ -344,8 +403,22 @@ export function CaptureScreen() {
         ref={camera}
         style={StyleSheet.absoluteFill}
         facing="back"
-        onCameraReady={() => setReady(true)}
+        pictureSize={pictureSize}
+        onCameraReady={() => {
+          setReady(true);
+          void chooseLargestPictureSize();
+        }}
       />
+
+      {/*
+        The filter, composited straight onto the preview and onto nothing else.
+
+        Order is the whole of it: this sits directly above `CameraView` and below everything
+        that follows, so it grades the photograph and leaves the chrome alone. The grain below
+        is film texture and belongs on top of a grade, which is also the order a darkroom
+        would put them in.
+      */}
+      <CaptureFilterLayer filterId={filterId} />
 
       {/* Fixed grain overlay above the preview. Never attached to a scroll container. */}
       <View pointerEvents="none" style={styles.grain} />
@@ -359,7 +432,13 @@ export function CaptureScreen() {
       {scoringInProgress ? (
         <ScoringOverlay phase={phase} photoUri={localUri} progress={progress} />
       ) : (
-        <CaptureOverlay phase={phase} onShutter={() => void submit()} onClose={close} />
+        <CaptureOverlay
+          phase={phase}
+          onShutter={() => void submit()}
+          onClose={close}
+          filterId={filterId}
+          onSelectFilter={setFilterId}
+        />
       )}
 
       {phase === 'rejected' ? (
@@ -405,10 +484,60 @@ function RejectionNotice({
   );
 }
 
+/**
+ * The largest still resolution in a list from `getAvailablePictureSizesAsync`.
+ *
+ * The two platforms answer this question in different vocabularies and both have to be
+ * handled, because the whole point is to stop relying on a default.
+ *
+ * **iOS** returns `AVCaptureSession` preset names alongside dimensions — `'photo'`, `'high'`,
+ * `'medium'`, `'low'`, `'1920x1080'`. `'photo'` is not one size among them: it is the preset
+ * meaning "full-resolution still capture", which is the sensor's native photograph and is
+ * larger than any of the numbered video presets. So it wins outright when present, and
+ * comparing it by area is impossible anyway — it has no digits to parse.
+ *
+ * **Android** returns plain `WxH` strings, so the largest is the largest by pixel area. Area
+ * rather than width: a device can offer both 4:3 and 16:9 at the same width, and the 4:3 one
+ * carries more pixels for a subject that is usually upright.
+ *
+ * Anything unparseable is ignored rather than guessed at.
+ */
+export function largestPictureSize(sizes: readonly string[]): string | undefined {
+  if (sizes.length === 0) return undefined;
+
+  // iOS: the full-resolution still preset outranks every numbered one. See above.
+  if (sizes.includes('photo')) return 'photo';
+
+  let best: string | undefined;
+  let bestArea = 0;
+
+  for (const size of sizes) {
+    const match = /^(\d+)\s*[x×]\s*(\d+)$/.exec(size.trim());
+    if (!match) continue;
+
+    const area = Number(match[1]) * Number(match[2]);
+    if (area > bestArea) {
+      bestArea = area;
+      best = size;
+    }
+  }
+
+  return best;
+}
+
 const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: arena.bg,
+    /*
+     * Contains the filter's blend mode.
+     *
+     * `mixBlendMode` composites against everything painted beneath it in the same stacking
+     * context. Without an explicit isolate that context is whatever ancestor happens to
+     * establish one, so a `saturation` layer could reach past the camera and drain the colour
+     * from the tab bar behind this screen. This makes the boundary the screen itself.
+     */
+    isolation: 'isolate',
   },
   /**
    * A hair of darkness over the preview. Not decoration: every piece of chrome on this

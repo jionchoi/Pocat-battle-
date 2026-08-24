@@ -168,7 +168,12 @@ export function Screen({
  * `size="lg"` is the exception, for a screen with **no title of its own** — the feed opens
  * on a wordmark, so "Trending now" and "For you" are the only headings on it and there is
  * nothing above them left to compete with. They are the screen's structure rather than a
- * label inside it, so they run at display size.
+ * label inside it, so they run larger than a section label.
+ *
+ * `lg` is `h2`, not `h1`. At 26pt it was the largest type on the feed and read as the
+ * screen's title rather than as the heading of a band inside it — the wordmark sits directly
+ * above it, and two competing titles is one too many. 20pt still separates it clearly from
+ * the 15pt `md` used elsewhere, and the glyph beside it carries the rest of the emphasis.
  */
 export const SectionHeader = React.memo(function SectionHeader({
   title,
@@ -199,13 +204,13 @@ export const SectionHeader = React.memo(function SectionHeader({
         <View style={styles.sectionTitleRow}>
           {Glyph ? (
             <Glyph
-              size={large ? 22 : 15}
+              size={large ? 19 : 15}
               weight="fill"
               color={glyphColor ?? marmalade[600]}
             />
           ) : null}
           <Text
-            style={[large ? text.h1 : text.h3, styles.sectionTitle, { color: c.text }]}
+            style={[large ? text.h2 : text.h3, styles.sectionTitle, { color: c.text }]}
           >
             {title}
           </Text>

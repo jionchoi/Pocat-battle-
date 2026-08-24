@@ -767,7 +767,9 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
               </View>
 
               <Text style={[text.body, { color: paper.textMuted }]}>
-                {revealHint(quotas)}
+                {isMine
+                  ? revealHint(quotas)
+                  : 'The photographer has not revealed this score yet.'}
               </Text>
 
               {/*
@@ -776,15 +778,20 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
                 goes stale the moment the rolling window turns over — greying this out would
                 mean a player whose slot freed up two minutes ago is told they have none,
                 by a screen that has not asked since.
+
+                Never offered on somebody else's photograph: a reveal spends *your* allowance
+                to score *their* photo, which is the player paying for a stranger's row.
               */}
-              <Button
-                label="Reveal the score"
-                onPress={() => void revealScore()}
-                loading={revealing}
-                disabled={revealing}
-                fullWidth
-                accessibilityHint="Uses one of your scores to have this photo judged"
-              />
+              {isMine ? (
+                <Button
+                  label="Reveal the score"
+                  onPress={() => void revealScore()}
+                  loading={revealing}
+                  disabled={revealing}
+                  fullWidth
+                  accessibilityHint="Uses one of your scores to have this photo judged"
+                />
+              ) : null}
             </View>
           )}
 
@@ -824,8 +831,14 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
             An unidentified photograph used to render the Dex row anyway, with an empty
             `catNickname` — so it read "'s Dex" and led to a cat profile for the empty string.
             Nothing in the app called `identify`, so that was every photograph in the album.
+
+            Hidden entirely on somebody else's photograph, and for the same reason. A Dex is
+            one player's private record: `catNickname` is the *reader's* name for the cat, so
+            on a stranger's photo it is always empty and this drew the exact "'s Dex" bug
+            described above. Identifying it would be worse still — it would file another
+            player's photograph into your Dex.
           */}
-          {photo.catId ? (
+          {!isMine ? null : photo.catId ? (
             <Pressable
               onPress={() => navigation.navigate('CatProfile', { catId: photo.catId })}
               accessibilityRole="button"
@@ -936,110 +949,149 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
             )}
           </Card>
 
-          <SectionHeader title="Caption" />
-          <TextField
-            label="Caption"
-            value={caption}
-            onChangeText={setCaptionText}
-            placeholder="Say something about this one"
-            maxLength={140}
-            multiline
-          />
-          {caption.trim() !== (photo.caption ?? '') ? (
-            <Button
-              label="Save caption"
-              variant="secondary"
-              onPress={() => void saveCaption()}
-              loading={savingCaption}
-              style={styles.saveCaption}
-            />
-          ) : null}
-
-          <SectionHeader
-            title="Sharing"
-            /*
-              "Not in the feed" rather than "not visible to anyone".
-
-              Photos live in a public storage bucket at an unguessable address: nothing
-              lists them, nothing links them, and the path cannot be walked — but a URL
-              that escaped would still open. The toggle below controls discoverability,
-              which is what it has always actually controlled, so that is what it says.
-            */
-            description="Your album stays out of the feed. Nothing here is shown to other players until you share it."
-          />
-
-          <DividedGroup>
-            <ToggleRow
-              label="Show in the community feed"
-              hint="Other players can see and react to this photo."
-              value={photo.sharedToFeed}
-              onChange={() => void toggleShared()}
-            />
-            <ToggleRow
-              label="Pin to my public profile"
-              hint="Appears in your showcase, up to six photos."
-              value={photo.showcased}
-              onChange={() => void toggleShowcased()}
-            />
-            {/*
-              The one switch here that starts on, and the hint says what turning it off
-              does and does not do. "Off the map" is a promise about other players, not
-              about the record: the coordinates stay so the Cat Dex can still recognise
-              this cat next time, which is a thing a player would reasonably assume the
-              switch also erased.
-            */}
-            <ToggleRow
-              label="Show as a pin on the map"
-              hint="Other players see roughly where this cat was — never the exact spot. Turning this off removes the pin; the photo keeps its location for Cat Dex matching."
-              value={photo.sharedToMap}
-              onChange={() => void toggleSharedToMap()}
-            />
-          </DividedGroup>
-
           {/*
-            The Dex gets its own section and its own paragraph because it is the one
-            control here whose effect is somewhere else in the app. "Save to Dex" on the
-            reveal screen is this same switch, and a player who pressed it there and
-            wondered what moved should find the answer written out here.
+            The caption is editable by exactly one person and readable by everyone.
 
-            Hidden entirely until the photograph has a cat. A card belongs to an animal, and
-            with no `catId` this drew "Use as 's Dex photo" and would have pinned against an
-            empty id. Declining to identify is a supported answer now, so this is a state
-            that will really happen rather than one that only existed before the sheet did.
+            A stranger gets the words without the field: an editor on somebody else's photo
+            offered to rewrite their caption, and the PATCH behind it is owner-only, so the
+            only possible outcome of using it was a 404 over a change the player had already
+            watched themselves type.
           */}
-          {photo.catId ? (
+          {isMine ? (
             <>
-          <SectionHeader
-            title="Cat Dex"
-            description={`Your Dex keeps one card per cat. The card shows your highest-scoring photo of that cat unless you choose a different one — it does not change the cat's score, tier or Dex entry, only the picture on the card.`}
-          />
-
-          <DividedGroup>
-            <ToggleRow
-              label={`Use as ${photo.catNickname}'s Dex photo`}
-              hint={
-                isDexPhoto
-                  ? `${photo.catNickname}'s card shows this photo because you chose it.`
-                  : dexEntry?.bestPhotoId === photo.id
-                    ? `This is already on the card as your best shot of ${photo.catNickname}. Turn this on to keep it there even after a higher score.`
-                    : `The card currently shows your highest-scoring shot of ${photo.catNickname}.`
-              }
-              value={isDexPhoto}
-              disabled={pinningDex}
-              onChange={() => void toggleDexPhoto()}
-            />
-          </DividedGroup>
+              <SectionHeader title="Caption" />
+              <TextField
+                label="Caption"
+                value={caption}
+                onChangeText={setCaptionText}
+                placeholder="Say something about this one"
+                maxLength={140}
+                multiline
+              />
+              {caption.trim() !== (photo.caption ?? '') ? (
+                <Button
+                  label="Save caption"
+                  variant="secondary"
+                  onPress={() => void saveCaption()}
+                  loading={savingCaption}
+                  style={styles.saveCaption}
+                />
+              ) : null}
+            </>
+          ) : photo.caption ? (
+            <>
+              <SectionHeader title="Caption" />
+              <Text style={[text.body, { color: paper.textMuted }]}>{photo.caption}</Text>
             </>
           ) : null}
 
+          {/*
+            Everything from here down changes the photograph, so none of it is drawn unless
+            the photograph is yours.
+
+            All three of these toggles, the Dex pin and the delete below PATCH or DELETE an
+            owner-only route. Rendering them for a reader who cannot use them offered a set
+            of switches whose only possible response was an error — and "Delete photo" sitting
+            under a stranger's picture reads as a claim about what this screen can do, which
+            is the one thing a destructive control must never get wrong.
+          */}
+          {isMine ? (
+            <>
+            <SectionHeader
+              title="Sharing"
+              /*
+                "Not in the feed" rather than "not visible to anyone".
+
+                Photos live in a public storage bucket at an unguessable address: nothing
+                lists them, nothing links them, and the path cannot be walked — but a URL
+                that escaped would still open. The toggle below controls discoverability,
+                which is what it has always actually controlled, so that is what it says.
+              */
+              description="Your album stays out of the feed. Nothing here is shown to other players until you share it."
+            />
+
+            <DividedGroup>
+              <ToggleRow
+                label="Show in the community feed"
+                hint="Other players can see and react to this photo."
+                value={photo.sharedToFeed}
+                onChange={() => void toggleShared()}
+              />
+              <ToggleRow
+                label="Pin to my public profile"
+                hint="Appears in your showcase, up to six photos."
+                value={photo.showcased}
+                onChange={() => void toggleShowcased()}
+              />
+              {/*
+                The one switch here that starts on, and the hint says what turning it off
+                does and does not do. "Off the map" is a promise about other players, not
+                about the record: the coordinates stay so the Cat Dex can still recognise
+                this cat next time, which is a thing a player would reasonably assume the
+                switch also erased.
+              */}
+              <ToggleRow
+                label="Show as a pin on the map"
+                hint="Other players see roughly where this cat was — never the exact spot. Turning this off removes the pin; the photo keeps its location for Cat Dex matching."
+                value={photo.sharedToMap}
+                onChange={() => void toggleSharedToMap()}
+              />
+            </DividedGroup>
+
+            {/*
+              The Dex gets its own section and its own paragraph because it is the one
+              control here whose effect is somewhere else in the app. "Save to Dex" on the
+              reveal screen is this same switch, and a player who pressed it there and
+              wondered what moved should find the answer written out here.
+
+              Hidden entirely until the photograph has a cat. A card belongs to an animal, and
+              with no `catId` this drew "Use as 's Dex photo" and would have pinned against an
+              empty id. Declining to identify is a supported answer now, so this is a state
+              that will really happen rather than one that only existed before the sheet did.
+            */}
+            {photo.catId ? (
+              <>
+            <SectionHeader
+              title="Cat Dex"
+              description={`Your Dex keeps one card per cat. The card shows your highest-scoring photo of that cat unless you choose a different one — it does not change the cat's score, tier or Dex entry, only the picture on the card.`}
+            />
+
+            <DividedGroup>
+              <ToggleRow
+                label={`Use as ${photo.catNickname}'s Dex photo`}
+                hint={
+                  isDexPhoto
+                    ? `${photo.catNickname}'s card shows this photo because you chose it.`
+                    : dexEntry?.bestPhotoId === photo.id
+                      ? `This is already on the card as your best shot of ${photo.catNickname}. Turn this on to keep it there even after a higher score.`
+                      : `The card currently shows your highest-scoring shot of ${photo.catNickname}.`
+                }
+                value={isDexPhoto}
+                disabled={pinningDex}
+                onChange={() => void toggleDexPhoto()}
+              />
+            </DividedGroup>
+              </>
+            ) : null}
+
+            </>
+          ) : null}
+
+          {/*
+            Sharing the link is not an owner's privilege — this opens the OS share sheet on a
+            photograph that is already published to the feed, which is the same act as sending
+            somebody a link to it. Deleting is, and it is the half that is gated.
+          */}
           <View style={styles.actions}>
             <Button label="Share this shot" onPress={() => void share()} trailingIcon />
-            <Button
-              label="Delete photo"
-              variant="ghost"
-              destructive
-              onPress={() => setConfirmingDelete(true)}
-            />
+            {isMine ? (
+              <Button
+                label="Delete photo"
+                variant="ghost"
+                destructive
+                onPress={() => setConfirmingDelete(true)}
+              />
+            ) : null}
           </View>
         </Animated.ScrollView>
         </GestureDetector>

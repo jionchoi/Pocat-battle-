@@ -58,6 +58,8 @@ interface AuthState {
   deleteAccount: () => Promise<void>;
   /** Applied after a capture whose response already told us the new totals. */
   applyCaptureRewards: (params: { award: CaptureAward; scoreAwarded: number }) => void;
+  /** The other half of `applyCaptureRewards`. See the note there. */
+  releaseDeletedPhoto: (params: { xpRevoked: number }) => void;
   clearError: () => void;
 }
 
@@ -221,6 +223,42 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         xpToNextRank: award.xpToNextRank,
         lifetimeScore: user.lifetimeScore + scoreAwarded,
         photoCount: user.photoCount + 1,
+      },
+    });
+  },
+
+  /**
+   * Undoes, locally, what a deleted photograph had added.
+   *
+   * Both numbers here are server totals that this store has been mutating optimistically
+   * since sign-in, and for a long time both only moved *up*. Deleting a photo left the grid
+   * short a tile while the caption under it still read "1 of 200", and the profile still
+   * reading "Newcomer · 59" for a score whose photograph no longer existed. Neither corrected
+   * until the next `refreshUser`, which on those screens means a relaunch.
+   *
+   * This is the optimistic half; `services/photos.remove` on the server does the durable one,
+   * and `albumStore.remove` refetches afterwards so the authoritative numbers land either way.
+   * Doing both is deliberate — the refetch alone is correct but arrives a round trip after the
+   * player watched the photo disappear.
+   *
+   * Both floored at zero. These counts can legitimately drift, because another device
+   * deleting a photo moves the real number without this one hearing about it, and "-1 of 200"
+   * renders that drift as a bug rather than as staleness.
+   *
+   * **Rank is deliberately not recomputed**, matching the server: `revokeForScore` keeps rank
+   * where it is, because cosmetic ownership is gated on rank and a demotion would repossess
+   * items a player already had. XP and rank are allowed to disagree after a deletion.
+   */
+  releaseDeletedPhoto: ({ xpRevoked }) => {
+    const user = get().user;
+    if (!user) return;
+
+    set({
+      user: {
+        ...user,
+        photoCount: Math.max(0, user.photoCount - 1),
+        photographerXp: Math.max(0, user.photographerXp - Math.max(0, xpRevoked)),
+        lifetimeScore: Math.max(0, user.lifetimeScore - Math.max(0, xpRevoked)),
       },
     });
   },
