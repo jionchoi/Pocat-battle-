@@ -24,7 +24,28 @@ export interface AlbumFilters {
 type Phase = 'idle' | 'loading' | 'refreshing' | 'ready' | 'error';
 
 interface AlbumState {
+  /**
+   * The album, unfiltered. The canonical list, and the only one anything outside the grid
+   * should read.
+   *
+   * Filtering used to write straight into this, which is a data-layer decision that leaked
+   * into two screens that never asked a question: the profile's "Recent" strip and its photo
+   * count both read this array, so filtering the album to Legendary emptied the profile as
+   * well. A filter is a way of *looking* at the album, not a smaller album.
+   */
   photos: Photo[];
+  /**
+   * The current filtered query's results, or null when no filter is set.
+   *
+   * A separate list rather than a predicate over `photos`, because the filter has to reach the
+   * whole album and `photos` holds one page of twenty. Filtering client-side would mean
+   * "Legendary" showing nothing until the player had scrolled far enough to load one.
+   */
+  filtered: Photo[] | null;
+  /** True while a filtered query is in flight. Deliberately not `phase`. See `applyFilters`. */
+  filtering: boolean;
+  /** Pagination for `filtered`, kept apart from `nextCursor` so the two cannot cross. */
+  filteredCursor: string | null;
   cats: Cat[];
   filters: AlbumFilters;
   phase: Phase;
@@ -37,6 +58,8 @@ interface AlbumState {
 
   load: (options?: { force?: boolean }) => Promise<void>;
   loadMore: () => Promise<void>;
+  /** Re-runs the current filters. Called by `setFilters`; exposed for retries. */
+  applyFilters: () => Promise<void>;
   loadCatDex: () => Promise<void>;
   setFilters: (filters: AlbumFilters) => void;
   clearFilters: () => void;
@@ -57,8 +80,36 @@ interface AlbumState {
   reset: () => void;
 }
 
+/**
+ * One field-level edit, applied to the album and to the filtered view of it.
+ *
+ * Every optimistic edit on this store used to map over `photos` alone. That was correct while
+ * there was one list; with `filtered` beside it, a caption typed on a photograph found through
+ * a rarity chip was written to a list the screen was not reading, so it reverted on the next
+ * render and came back only after a refetch.
+ *
+ * `filtered` is left as `null` when it already is: an absent filtered view must not be brought
+ * into existence by an edit, because null is what tells the grid there is no filter.
+ */
+function patchPhoto(
+  state: Pick<AlbumState, 'photos' | 'filtered'>,
+  photoId: string,
+  patch: Partial<Photo>
+): Pick<AlbumState, 'photos' | 'filtered'> {
+  const apply = (list: Photo[]) =>
+    list.map((p) => (p.id === photoId ? { ...p, ...patch } : p));
+
+  return {
+    photos: apply(state.photos),
+    filtered: state.filtered ? apply(state.filtered) : null,
+  };
+}
+
 export const useAlbumStore = create<AlbumState>((set, get) => ({
   photos: [],
+  filtered: null,
+  filtering: false,
+  filteredCursor: null,
   cats: [],
   filters: {},
   phase: 'idle',
@@ -91,7 +142,8 @@ export const useAlbumStore = create<AlbumState>((set, get) => ({
     // Local first. The grid paints from cache while the request is in flight.
     if (!hadData || options?.force) {
       try {
-        const local = await readPhotos({ ownerId, ...get().filters });
+        // Unfiltered, like the request below it. See the note on `photos`.
+        const local = await readPhotos({ ownerId });
         if (local.length > 0) set({ photos: local, phase: 'refreshing' });
       } catch {
         // A cache read failure is not worth surfacing — the server fetch below is next.
@@ -99,17 +151,24 @@ export const useAlbumStore = create<AlbumState>((set, get) => ({
     }
 
     try {
+      /*
+       * No filters on this request, ever.
+       *
+       * This is the album itself, not a view of it — `applyFilters` is what asks a narrower
+       * question, and it keeps its answer in `filtered`. Sending the filters here is what
+       * used to make a rarity chip replace the canonical list, which took the profile's
+       * "Recent" strip and its photo count down with it.
+       */
       const { photos, nextCursor } = await albumApi.list({
-        ...get().filters,
         limit: ALBUM_CONFIG.pageSize,
       });
 
       set({ photos, nextCursor, phase: 'ready', stale: false, error: null });
 
-      // Only replace the cache on an unfiltered fetch. Replacing it from a filtered
-      // response would delete every photo that did not match the filter.
-      const unfiltered = Object.keys(get().filters).length === 0;
-      if (unfiltered) await replacePhotos(ownerId, photos);
+      // Unconditional now that this response is always the whole album. It used to be gated
+      // on there being no filters, because replacing the cache from a filtered response
+      // deletes every photo that did not match.
+      await replacePhotos(ownerId, photos);
     } catch (err) {
       const hasData = get().photos.length > 0;
 
@@ -139,30 +198,90 @@ export const useAlbumStore = create<AlbumState>((set, get) => ({
     }
   },
 
+  /**
+   * The next page of whichever list is on screen.
+   *
+   * Two lists, two cursors, and the active filter is what decides which pair this is talking
+   * about. Sharing one cursor between them would page the filtered list with an offset into
+   * the unfiltered one, which does not fail — it silently returns the wrong photographs.
+   */
   loadMore: async () => {
-    const { nextCursor, loadingMore, photos, filters } = get();
-    if (!nextCursor || loadingMore) return;
+    const { loadingMore, photos, filtered, filters, nextCursor, filteredCursor } = get();
+    if (loadingMore) return;
+
+    const isFiltered = filtered !== null;
+    const cursor = isFiltered ? filteredCursor : nextCursor;
+    const current = isFiltered ? filtered : photos;
+    if (!cursor) return;
 
     set({ loadingMore: true });
 
     try {
       const result = await albumApi.list({
-        ...filters,
-        cursor: nextCursor,
+        ...(isFiltered ? filters : {}),
+        cursor,
         limit: ALBUM_CONFIG.pageSize,
       });
 
       // Deduplicate: a photo captured mid-scroll shifts the cursor window and can repeat.
-      const seen = new Set(photos.map((p) => p.id));
+      const seen = new Set(current.map((p) => p.id));
       const fresh = result.photos.filter((p) => !seen.has(p.id));
 
-      set({
-        photos: [...photos, ...fresh],
-        nextCursor: result.nextCursor,
-        loadingMore: false,
-      });
+      set(
+        isFiltered
+          ? {
+              filtered: [...current, ...fresh],
+              filteredCursor: result.nextCursor,
+              loadingMore: false,
+            }
+          : {
+              photos: [...current, ...fresh],
+              nextCursor: result.nextCursor,
+              loadingMore: false,
+            }
+      );
     } catch {
       set({ loadingMore: false });
+    }
+  },
+
+  /**
+   * Runs the current filters and keeps the answer beside the album rather than on top of it.
+   *
+   * `filtering` rather than `phase: 'refreshing'`, and that distinction is the whole point:
+   * `phase` drives the grid's pull-to-refresh control, so routing a filter through it dropped
+   * the platform's refresh spinner from the top of the screen every time a rarity chip was
+   * tapped. A filter is not a refresh — the player did not ask for newer data, they asked a
+   * narrower question — so it gets its own flag and its own quiet treatment.
+   *
+   * An empty filter set is not a query. It clears `filtered` and the grid falls back to the
+   * album, which is why nothing here has to fetch to get back to the unfiltered view.
+   */
+  applyFilters: async () => {
+    const { filters } = get();
+
+    if (Object.keys(filters).length === 0) {
+      set({ filtered: null, filteredCursor: null, filtering: false });
+      return;
+    }
+
+    set({ filtering: true });
+
+    try {
+      const { photos, nextCursor } = await albumApi.list({
+        ...filters,
+        limit: ALBUM_CONFIG.pageSize,
+      });
+
+      // Checked against the filters this started with: a player tapping through chips can
+      // land a slow response after a newer one, and the last write would win the wrong way.
+      if (get().filters !== filters) return;
+
+      set({ filtered: photos, filteredCursor: nextCursor, filtering: false });
+    } catch {
+      // No error surface of its own. The album underneath is intact and the grid falls back
+      // to it, which is a better answer than an empty screen with a message on it.
+      set({ filtered: null, filteredCursor: null, filtering: false });
     }
   },
 
@@ -179,13 +298,17 @@ export const useAlbumStore = create<AlbumState>((set, get) => ({
   },
 
   setFilters: (filters) => {
-    set({ filters, nextCursor: null });
-    void get().load({ force: true });
+    // `nextCursor` is untouched: it belongs to the unfiltered album, which this does not
+    // disturb. Resetting it here is what used to make the album forget its own pagination
+    // every time a chip was tapped.
+    set({ filters });
+    void get().applyFilters();
   },
 
   clearFilters: () => {
-    set({ filters: {}, nextCursor: null });
-    void get().load({ force: true });
+    // Synchronous and complete. Going back to the whole album is not a fetch — the album is
+    // already in `photos` — so this is the one filter transition with no request behind it.
+    set({ filters: {}, filtered: null, filteredCursor: null, filtering: false });
   },
 
   upsert: async (photo) => {
@@ -242,24 +365,32 @@ export const useAlbumStore = create<AlbumState>((set, get) => ({
   },
 
   setCaption: async (photoId, caption) => {
-    const previous = get().photos;
+    /*
+     * Both lists, because `patchPhoto` writes to both.
+     *
+     * A rollback that restored `photos` alone would leave the optimistic edit standing in
+     * `filtered` — which is the list the grid is reading whenever a filter is on, so the
+     * failure would be invisible on exactly the screen it happened on.
+     */
+    const previous = { photos: get().photos, filtered: get().filtered };
 
     // Optimistic: editing a caption should feel instant. Rolled back if the server
     // disagrees, which for a caption realistically only happens offline.
-    set({ photos: previous.map((p) => (p.id === photoId ? { ...p, caption } : p)) });
+    set(patchPhoto(get(), photoId, { caption }));
 
     try {
       const { photo } = await photoApi.update(photoId, { caption });
       await get().upsert(photo);
     } catch (err) {
-      set({ photos: previous });
+      set(previous);
       throw err;
     }
   },
 
   setShared: async (photoId, sharedToFeed) => {
-    const previous = get().photos;
-    set({ photos: previous.map((p) => (p.id === photoId ? { ...p, sharedToFeed } : p)) });
+    // Both lists. See `setCaption`.
+    const previous = { photos: get().photos, filtered: get().filtered };
+    set(patchPhoto(get(), photoId, { sharedToFeed }));
 
     try {
       const { photo } = await photoApi.update(photoId, { sharedToFeed });
@@ -267,7 +398,7 @@ export const useAlbumStore = create<AlbumState>((set, get) => ({
     } catch (err) {
       // Sharing is a privacy action — a failed toggle must snap back rather than leave
       // the player believing a photo is public when it is not, or vice versa.
-      set({ photos: previous });
+      set(previous);
       throw err;
     }
   },
@@ -280,8 +411,9 @@ export const useAlbumStore = create<AlbumState>((set, get) => ({
   },
 
   setSharedToMap: async (photoId, sharedToMap) => {
-    const previous = get().photos;
-    set({ photos: previous.map((p) => (p.id === photoId ? { ...p, sharedToMap } : p)) });
+    // Both lists. See `setCaption`.
+    const previous = { photos: get().photos, filtered: get().filtered };
+    set(patchPhoto(get(), photoId, { sharedToMap }));
 
     try {
       const { photo } = await photoApi.update(photoId, { sharedToMap });
@@ -290,7 +422,7 @@ export const useAlbumStore = create<AlbumState>((set, get) => ({
       // Same rollback as `setShared`, and for the sharper version of the same reason: a
       // switch that stayed off after failing to turn off would tell a player their location
       // is private while a pin is still on the map.
-      set({ photos: previous });
+      set(previous);
       throw err;
     }
   },
@@ -309,17 +441,23 @@ export const useAlbumStore = create<AlbumState>((set, get) => ({
     const previousUser = useAuthStore.getState().user;
 
     /*
-     * The XP this photograph earned, which the server is about to take back.
+     * No XP is computed here any more, and that is the whole of what deleting now costs: a
+     * tile and a slot.
      *
-     * `xpForScore` on the server is `Math.round(scoreTotal)`, so the score *is* the XP and
-     * this needs no formula of its own. Unscored photos credited nothing and revoke nothing —
-     * `scoredAt` is the field that says which, exactly as it does everywhere else.
+     * This used to work out the score's XP so it could be subtracted optimistically. As of
+     * 2026-08-31 the server revokes nothing on a delete — the reveal that paid for the score is
+     * not refunded either, so taking the reward back would charge the player twice — and the
+     * client has no figure to guess.
      */
-    const doomed = previousPhotos.find((p) => p.id === photoId);
-    const xpRevoked = doomed?.scoredAt ? doomed.scores.total : 0;
+    const previousFiltered = get().filtered;
 
-    set({ photos: previousPhotos.filter((p) => p.id !== photoId) });
-    useAuthStore.getState().releaseDeletedPhoto({ xpRevoked });
+    // Both lists, or a photo deleted from a filtered grid leaves its tile behind on the very
+    // screen the player deleted it from.
+    set({
+      photos: previousPhotos.filter((p) => p.id !== photoId),
+      filtered: previousFiltered?.filter((p) => p.id !== photoId) ?? null,
+    });
+    useAuthStore.getState().releaseDeletedPhoto();
 
     try {
       await photoApi.remove(photoId);
@@ -335,7 +473,7 @@ export const useAlbumStore = create<AlbumState>((set, get) => ({
        */
       void useAuthStore.getState().refreshUser();
     } catch (err) {
-      set({ photos: previousPhotos });
+      set({ photos: previousPhotos, filtered: previousFiltered });
 
       // Restored wholesale rather than added back field by field, so a refreshUser that
       // landed mid-request is not undone by re-incrementing stale numbers.
@@ -386,7 +524,17 @@ export const useAlbumStore = create<AlbumState>((set, get) => ({
     get().upsertCat(cat);
   },
 
-  byId: (photoId) => get().photos.find((p) => p.id === photoId),
+  /*
+   * Both lists, and the filtered one is not redundant.
+   *
+   * `filtered` reaches the whole album while `photos` holds the pages that have been scrolled
+   * to, so a photograph two pages deep in a rarity filter is on screen and reachable by tap
+   * while being absent from `photos` entirely. Looking in one list only is how tapping a card
+   * in a filtered grid opens a detail screen that cannot find its own photo.
+   */
+  byId: (photoId) =>
+    get().photos.find((p) => p.id === photoId) ??
+    get().filtered?.find((p) => p.id === photoId),
   catById: (catId) => get().cats.find((c) => c.id === catId),
 
   reset: () =>
@@ -394,6 +542,9 @@ export const useAlbumStore = create<AlbumState>((set, get) => ({
       photos: [],
       cats: [],
       filters: {},
+      filtered: null,
+      filtering: false,
+      filteredCursor: null,
       phase: 'idle',
       catdexPhase: 'idle',
       error: null,

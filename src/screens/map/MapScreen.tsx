@@ -9,10 +9,12 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
+import { useFocusEffect } from '@react-navigation/native';
 import type { CompositeScreenProps } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { InlineError, EmptyState } from '../../components/EmptyState';
+import { useStatusBarStyle } from '../../components/Screen';
 import { SelfMarker, SightingPin } from '../../components/MapPin';
 import type { MapStackParamList, MainTabParamList } from '../../navigation/types';
 import { MAP_CONFIG } from '../../constants/game';
@@ -113,6 +115,25 @@ export function MapScreen({ navigation }: Props) {
     authApi.setHomeLocation({ lat: position.lat, lng: position.lng }).catch(() => undefined);
   }, [position, user]);
 
+  /*
+   * Refetch whenever the map is looked at again.
+   *
+   * Sightings only ever arrived through `onRegionChangeComplete`, which fires when the camera
+   * moves — so a photo shared to the map from the capture flow did not appear when the player
+   * landed back here. It appeared the moment they panned, which is why it looked like the map
+   * needed to be tapped before it would tell the truth.
+   *
+   * `retry` refetches `lastViewport`, which is the store's record of the region the map is
+   * actually showing, so this asks for exactly what is on screen rather than guessing a
+   * viewport. It no-ops before the first region settles, and the fetch behind it is debounced
+   * and aborts its predecessor, so a fast tab-switch cannot stack requests.
+   */
+  useFocusEffect(
+    useCallback(() => {
+      retry();
+    }, [retry])
+  );
+
   const onRegionChangeComplete = useCallback(
     (next: Region) => {
       fetchViewport(regionToViewport(next));
@@ -170,6 +191,13 @@ export function MapScreen({ navigation }: Props) {
     () => (preview && position ? distanceBetween(position, preview.location) : null),
     [position, preview]
   );
+
+  /*
+   * Dark glyphs in the notch. This screen is a light map with a white sheet over it, and it
+   * does not render `Screen` — so before this it simply inherited whatever the last surface
+   * set, which after a trip to the camera was white-on-white. Both branches below are paper.
+   */
+  useStatusBarStyle('dark');
 
   if (permission === 'denied') {
     return (

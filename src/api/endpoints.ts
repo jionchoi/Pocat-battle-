@@ -4,6 +4,7 @@ import type {
   CatProfile,
   Challenge,
   ChallengeGoal,
+  ChallengeTrophy,
   ChallengeLeader,
   CatSighting,
   GeoPoint,
@@ -12,6 +13,7 @@ import type {
   LeaderboardMetric,
   LeaderboardScope,
   Photo,
+  PhotoDetail,
   PhotoWithAuthor,
   PublicProfile,
   Rarity,
@@ -111,7 +113,12 @@ export const photoApi = {
   /** What is left in the rolling window, and how full the album is. */
   allowance: () => api.get<Quotas>('/photos/allowance'),
 
-  detail: (photoId: string) => api.get<{ photo: Photo }>(`/photos/${photoId}`),
+  /**
+   * One photograph. The album serialization for its owner, the feed card for anybody else
+   * — so the reply carries an `author` exactly when the caller is not the owner. See
+   * `PhotoDetail`.
+   */
+  detail: (photoId: string) => api.get<{ photo: PhotoDetail }>(`/photos/${photoId}`),
 
   update: (
     photoId: string,
@@ -174,6 +181,49 @@ export const photoApi = {
    */
   impressions: (photoIds: string[]) =>
     api.post<{ recorded: number }>('/photos/impressions', { photoIds }),
+};
+
+/* ---------------------------------- paws ---------------------------------- */
+
+/** Which pot a paw came out of. The server decides; the client is told. */
+export type PawBucket = 'grant' | 'wallet';
+
+export interface PawBalance {
+  /** The weekly allowance. Expires — `resetsAt` is when it refills. */
+  grant: { remaining: number; resetsAt: string };
+  /** Received, won or bought. Never expires. */
+  wallet: number;
+}
+
+export interface PawGiftResult {
+  pawCount: number;
+  bucket: PawBucket;
+  balance: PawBalance;
+}
+
+/**
+ * The paw economy — giving only.
+ *
+ * There is no `spend`. Reveals and cosmetics are priced in paws eventually and none of that
+ * is built: it needs an entitlements table for cosmetics to live in, and prices nobody has
+ * set. Giving works without any of it, which is why it shipped first.
+ *
+ * ## No body on the write, and no way back
+ *
+ * One paw per tap, and **the server picks the bucket**. Grant paws expire and wallet paws do
+ * not, so spending the wallet first is worse for the player in every case — a request that
+ * let the client choose would be offering a choice with one right answer, which is a trap
+ * rather than a setting.
+ *
+ * **A gift is final.** There is no `undo` here and no `DELETE` on the server: a paw that has
+ * been given stays given, because a gift that can evaporate is not a gift and the recipient
+ * would be the one watching it go. See `server/src/game/paws.ts`.
+ */
+export const pawApi = {
+  balance: () => api.get<PawBalance>('/paws/balance'),
+
+  /** Gives one, for good. Refuses your own photo, and refuses an empty balance with `no_paws`. */
+  give: (photoId: string) => api.post<PawGiftResult>(`/photos/${photoId}/paw`, {}),
 };
 
 /* ---------------------------------- album --------------------------------- */
@@ -262,6 +312,16 @@ export const challengeApi = {
   active: () => api.get<ActiveChallenges>('/challenges/active'),
 
   eligiblePhotos: () => api.get<{ photos: Photo[] }>('/challenges/eligible-photos'),
+
+  /**
+   * The caller's own wins, for the trophy case on their profile.
+   *
+   * A stranger's wins arrive inside `socialApi.publicProfile`, because a stranger's profile
+   * is one request. Your own profile is assembled on the device out of stores that are
+   * already loaded and makes no `publicProfile` call, so there is nothing to hang them off
+   * and they get a request of their own.
+   */
+  wins: () => api.get<{ trophies: ChallengeTrophy[] }>('/challenges/wins'),
 
   entries: (challengeId: string) =>
     api.get<{ entries: PhotoWithAuthor[] }>(`/challenges/${challengeId}/entries`),
@@ -367,11 +427,33 @@ export const socialApi = {
 export interface CatalogResponse {
   proActive: boolean;
   photographerRank: number;
+  /**
+   * The wallet, sent with the catalogue rather than fetched separately.
+   *
+   * Every purchasable row has to know whether its paw price is within reach, and a second
+   * request for that would mean two answers about one balance racing to render one screen.
+   */
+  walletBalance: number;
   items: ShopItem[];
 }
 
 export const shopApi = {
   catalog: () => api.get<CatalogResponse>('/shop/catalog'),
+
+  /**
+   * Buys one catalogue item with paws.
+   *
+   * **No price in the request.** The server charges the authored price and records what it
+   * actually took, so a stale catalogue on this device cannot buy anything at yesterday's
+   * number. Sends the id and nothing else.
+   *
+   * Answers with the whole catalogue rather than the one row, because one unlock moves more
+   * than one row's state: the wallet falls, which can take every other paw price out of reach.
+   *
+   * Refusals worth telling apart by `code`: `already_owned`, `not_for_paws`, `no_paws`.
+   */
+  unlock: (entryId: string) =>
+    api.post<CatalogResponse & { unlocked: string }>('/shop/unlock', { entryId }),
 
   purchase: (body: { platform: 'ios' | 'android'; productId: string; receipt: string }) =>
     api.post<CatalogResponse & { granted: boolean; alreadyApplied: boolean }>(

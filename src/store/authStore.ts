@@ -59,7 +59,7 @@ interface AuthState {
   /** Applied after a capture whose response already told us the new totals. */
   applyCaptureRewards: (params: { award: CaptureAward; scoreAwarded: number }) => void;
   /** The other half of `applyCaptureRewards`. See the note there. */
-  releaseDeletedPhoto: (params: { xpRevoked: number }) => void;
+  releaseDeletedPhoto: () => void;
   clearError: () => void;
 }
 
@@ -245,11 +245,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
    * deleting a photo moves the real number without this one hearing about it, and "-1 of 200"
    * renders that drift as a bug rather than as staleness.
    *
-   * **Rank is deliberately not recomputed**, matching the server: `revokeForScore` keeps rank
-   * where it is, because cosmetic ownership is gated on rank and a demotion would repossess
-   * items a player already had. XP and rank are allowed to disagree after a deletion.
+   * **Only the count moves.** XP, rank and lifetime score are all left exactly where they are,
+   * matching the server as of 2026-08-31: deleting a photograph no longer revokes anything it
+   * earned, because the score was paid for and the payment is not refunded either. This used
+   * to subtract the score from `photographerXp` and `lifetimeScore` optimistically; taking that
+   * out is the client half of the same change. See the delete path in `services/photos.ts`.
    */
-  releaseDeletedPhoto: ({ xpRevoked }) => {
+  releaseDeletedPhoto: () => {
     const user = get().user;
     if (!user) return;
 
@@ -257,8 +259,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       user: {
         ...user,
         photoCount: Math.max(0, user.photoCount - 1),
-        photographerXp: Math.max(0, user.photographerXp - Math.max(0, xpRevoked)),
-        lifetimeScore: Math.max(0, user.lifetimeScore - Math.max(0, xpRevoked)),
       },
     });
   },

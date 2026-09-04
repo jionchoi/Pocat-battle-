@@ -38,9 +38,23 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
  * A column is probed by selecting it; PostgREST answers `42703` for one that is not there. A
  * table is probed the same way on its primary key.
  *
- * The last entry is the interesting one. `friendships` is created in the *third* block of
+ * `friendships` is one of the interesting ones. It is created in the *third* block of
  * `2026-08-13_social_and_account.sql`, after the column grant that closes trap 17 — so the
  * table existing proves the grant ran, which is not otherwise checkable from out here.
+ *
+ * ## What this cannot see
+ *
+ * `2026-08-28_five_reactions.sql` widens a check constraint and creates nothing, so there is
+ * no table or column to select and it has no row below. A probe for it would have to *write* a
+ * vote with `reaction = 'melt'` and read the error, and this script is read-only on purpose —
+ * a schema probe that inserts rows is a schema probe nobody runs against production. Until
+ * that migration is applied, 🥹 and 🔥 answer a check-constraint violation on the tap and this
+ * script will happily say every migration is applied.
+ *
+ * **Add a row here whenever a migration creates something.** This list is hand-maintained, and
+ * a hand-maintained list of what is applied is exactly what was wrong on 2026-08-14 — the
+ * difference is that being wrong *here* is one line, where being wrong in a markdown file cost
+ * a day.
  */
 const PROBES = [
   ['2026-08-07_create_profiles', 'profiles', 'id'],
@@ -54,6 +68,12 @@ const PROBES = [
   ['2026-08-12_challenges (entries)', 'challenge_entries', 'id'],
   ['2026-08-13_social_and_account (settings)', 'profiles', 'home_lat'],
   ['2026-08-13_social_and_account (friendships + the grant)', 'friendships', 'id'],
+  ['2026-08-29_paws (grants)', 'paw_grants', 'user_id'],
+  ['2026-08-29_paws (ledger)', 'paw_ledger', 'id'],
+  ['2026-08-29_paws (counter)', 'photos', 'paw_count'],
+  ['2026-08-30_paw_spending (entitlements)', 'entitlements', 'user_id'],
+  ['2026-08-30_paw_spending (ledger entry_id)', 'paw_ledger', 'entry_id'],
+  ['2026-08-31_reveal_attribution', 'photos', 'revealed_by'],
 ];
 
 let missing = 0;

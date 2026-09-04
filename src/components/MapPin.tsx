@@ -56,13 +56,24 @@ function usePressScale() {
 }
 
 /**
- * Cat sighting. Verified pins are filled; unverified are outlined.
+ * Cat sighting. Pins backed by a photograph are filled; bare reports are outlined.
+ *
+ * ## What `verified` actually means
+ *
+ * "A photograph was taken here", and nothing else. There is no review queue, no second
+ * player confirming anything and no moderator — the server sets it from whether the pin has
+ * a capture behind it (`serializers/sighting.ts`), and since every pin the map serves today
+ * comes from a capture, it is currently always true. The outlined state is reserved for the
+ * bare `POST /map/sightings` report, which has no caller yet.
+ *
+ * The copy says that rather than saying "verified", which invited the reading that somebody
+ * checked. Nobody checked. A photograph is the only evidence in the system.
  *
  * One pin can stand for several photographs taken in the same spot — a doorway a cat sits in
  * every afternoon is a dozen captures within a few metres, and a dozen overlapping pins is
  * unreadable and, worse, untappable. `count` above one puts a badge on the corner, and the pin
  * itself does not change size: a bigger circle for a busier place would compete with the
- * verified/unverified distinction the fill is already carrying.
+ * photographed/reported distinction the fill is already carrying.
  */
 export const SightingPin = React.memo(function SightingPin({
   verified,
@@ -80,7 +91,11 @@ export const SightingPin = React.memo(function SightingPin({
 
   const many = count > 1;
 
-  const subject = isMine ? 'Your catch' : verified ? 'Verified cat sighting' : 'Unverified cat sighting';
+  const subject = isMine
+    ? 'Your catch'
+    : verified
+      ? 'Cat sighting, photographed'
+      : 'Cat sighting, reported without a photo';
 
   return (
     <Pressable

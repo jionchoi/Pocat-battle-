@@ -60,70 +60,35 @@ export async function awardForScore(
 }
 
 /**
- * XP for something that is not a photograph's score — winning a challenge, so far.
+ * XP for something that is not a photograph's score — winning a challenge, and now revealing
+ * somebody else's photograph.
  *
  * Separate entry point rather than a flag on the one above, because `best_score` must not
- * move: it is the highest single-photo score a player has ever *reached*, and a challenge
- * prize is not a photograph. Folding the two together would mean a reward could set a
- * personal best nobody photographed.
+ * move: it is the highest single-photo score a player has ever *reached*, and neither a
+ * challenge prize nor a photograph you merely paid to look at is one. Folding the two together
+ * would mean a reward could set a personal best nobody photographed — or, worse, that buying a
+ * reveal of a stranger's brilliant photo could set *your* best score with their work.
  */
 export async function awardXp(userId: string, xp: number): Promise<Award | null> {
   return credit(userId, Math.max(0, Math.round(xp)), null);
 }
 
-/**
- * Takes back the XP a deleted photograph earned.
+/*
+ * `revokeForScore` and `revokeXp` used to live here and were deleted on 2026-08-31.
  *
- * The counterpart to `awardForScore`, and it exists because the profile kept reading
- * "Newcomer · 59" after the photograph that scored the 59 had been deleted — the album lost
- * the tile and the progress meter carried on as if nothing had happened.
+ * They took XP back when a photograph was deleted. The reason they are gone rather than merely
+ * unused: **the score's cost is not refunded on a delete, so its reward is not either.** That
+ * is the principle `2026-08-10_reveal_ledger.sql` was written to establish — the `reveals`
+ * table outlives its photo precisely so deleting one cannot hand the reveal back — and revoking
+ * the XP while keeping the charge made the player pay twice for one look.
  *
- * ## Two things it deliberately does not take back
+ * The consequence is worth stating positively, because it is now an invariant this file can be
+ * read against: **nothing here ever goes down.** `xp`, `rank` and `best_score` only rise. If
+ * something ever needs to fall, it needs a better reason than a deletion, and it should be
+ * written as its own function rather than by reviving these.
  *
- * **Rank never falls.** `credit` assigns `Math.max(stats.rank, rankForXp(xp))` and this keeps
- * that invariant rather than quietly becoming the one place it breaks. It is not only
- * sentiment: `ownsEntry` in `game/shop.ts` decides cosmetic ownership by rank, so a demotion
- * would silently repossess items a player already had on their profile. Deleting a bad photo
- * must not cost somebody a frame they earned last week.
- *
- * **`best_score` never falls either**, for the reason already written on it: it is the highest
- * score a player has ever reached, and you took that shot.
- *
- * The result is that XP and rank can disagree after a deletion — a player can sit at rank 3
- * on rank-2 XP. That is intentional and it is the same shape as the retuning case the ramp
- * already documents: the ramp says what a rank *costs to reach*, never what it costs to keep.
+ * See the long note in `services/photos.ts`'s delete path for the whole argument.
  */
-export async function revokeForScore(userId: string, scoreTotal: number): Promise<void> {
-  const spent = xpForScore(scoreTotal);
-  if (spent <= 0) return;
-
-  const { data: stats, error } = await supabase
-    .from('player_stats')
-    .select('xp')
-    .eq('user_id', userId)
-    .maybeSingle<{ xp: number }>();
-
-  if (error) throw error;
-
-  /*
-   * Same reasoning as `credit`'s missing-row branch, pointed the other way: the photograph is
-   * already gone by the time this runs, so throwing here would report a failed delete for a
-   * delete that succeeded.
-   */
-  if (!stats) {
-    console.warn('[progression] no player_stats row for', userId);
-    return;
-  }
-
-  const { error: writeError } = await supabase
-    .from('player_stats')
-    // Floored, because the subtraction is only as exact as the row it reads: a score written
-    // before `xpForScore` was what it is today would otherwise drive this negative.
-    .update({ xp: Math.max(0, stats.xp - spent) })
-    .eq('user_id', userId);
-
-  if (writeError) throw writeError;
-}
 
 async function credit(
   userId: string,

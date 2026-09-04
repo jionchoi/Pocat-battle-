@@ -13,14 +13,21 @@
  */
 
 import {
+  FOREIGN_REVEAL_XP_MULTIPLIER,
   RANK_TIERS,
   rankForXp,
   rankTitle,
+  xpForRevealingAnother,
   xpForScore,
   xpToNextRank,
 } from '../src/game/progression.js';
 
 let failures = 0;
+
+function ok(label: string, condition: boolean): void {
+  if (!condition) failures += 1;
+  console.log(`${condition ? 'PASS' : 'FAIL'}  ${label}`);
+}
 
 function check(label: string, actual: unknown, expected: unknown): void {
   const ok = JSON.stringify(actual) === JSON.stringify(expected);
@@ -48,6 +55,55 @@ check('a fractional total rounds rather than truncating', xpForScore(72.6), 73);
  */
 check('a negative total earns nothing', xpForScore(-40), 0);
 check('NaN earns nothing', xpForScore(Number.NaN), 0);
+
+console.log('\n-- unlocking somebody else’s score --\n');
+
+/*
+ * A paid reveal pays two people and the unlocker gets more. Both halves are checked here
+ * because the relationship between them is the rule, not either number on its own: the
+ * photographer is paid `xpForScore` (that is `awardForScore`, unchanged), and the unlocker is
+ * paid this.
+ */
+check(
+  'unlocking pays a multiple of the score',
+  xpForRevealingAnother(60),
+  60 * FOREIGN_REVEAL_XP_MULTIPLIER
+);
+
+/*
+ * The whole point of the bonus: it has to be worth more than revealing one of your own, or
+ * spending paws on somebody else's photograph pays the same as spending nothing on yours.
+ */
+ok(
+  'unlocking somebody else’s beats revealing your own',
+  xpForRevealingAnother(60) > xpForScore(60)
+);
+
+/*
+ * And it holds across the range, not just at one convenient score. The photographer is paid
+ * `xpForScore`, so this is the same comparison at every total a photograph can reach — the
+ * failure it guards is a multiplier that rounds away to nothing on small scores.
+ */
+ok(
+  'the unlocker is paid more than the photographer at every score',
+  [1, 7, 42, 60, 99, 137].every((total) => xpForRevealingAnother(total) > xpForScore(total))
+);
+
+ok(
+  'the multiplier is greater than one, or the bonus is not a bonus',
+  FOREIGN_REVEAL_XP_MULTIPLIER > 1
+);
+
+/* Refusals are inherited rather than restated: a broken score is worth nothing to anybody. */
+check('a negative total unlocks nothing', xpForRevealingAnother(-40), 0);
+check('NaN unlocks nothing', xpForRevealingAnother(Number.NaN), 0);
+
+/*
+ * Rounded once, at the end. A fractional multiplier on an odd score must not put a fraction
+ * into a column that holds whole numbers — and `xp` is read straight into the rank ramp, so a
+ * non-integer there would propagate into every threshold comparison.
+ */
+ok('the result is always a whole number', Number.isInteger(xpForRevealingAnother(72.6)));
 
 console.log('\n-- the ramp --\n');
 

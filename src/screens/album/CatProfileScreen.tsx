@@ -5,6 +5,10 @@ import { PawPrint } from 'phosphor-react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { catdexApi } from '../../api/endpoints';
+import {
+  isPlaceholderId,
+  placeholderCatProfile,
+} from '../../constants/placeholders';
 import { Badge, RarityBadge } from '../../components/Badge';
 import { BottomSheet } from '../../components/BottomSheet';
 import { Button } from '../../components/Button';
@@ -48,6 +52,24 @@ export function CatProfileScreen({ route, navigation }: Props) {
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
+
+    /*
+     * A design placeholder has no row behind it, so there is nothing to fetch. Without this
+     * every tile in the stand-in Dex dead-ends at "we could not load that cat", and the half
+     * of the Dex with the encounter history on it is unreachable. See `constants/placeholders`.
+     */
+    if (isPlaceholderId(catId)) {
+      const stand = placeholderCatProfile(catId);
+      if (stand) {
+        setProfile(stand);
+        setNickname(stand.cat.nickname ?? '');
+        setBio(stand.cat.bio ?? '');
+      } else {
+        setError('We could not load that cat.');
+      }
+      setLoading(false);
+      return;
+    }
 
     try {
       const result = await catdexApi.profile(catId);

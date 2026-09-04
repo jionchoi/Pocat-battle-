@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Image } from 'expo-image';
 import { CaretRight, Gear } from 'phosphor-react-native';
@@ -18,11 +18,14 @@ import {
   RankPill,
   ShowcaseTile,
   StatRail,
+  TrophyCase,
   SHOWCASE_LIMIT,
 } from '../../components/ProfileParts';
 import { Screen, SectionHeader } from '../../components/Screen';
+import { challengeApi } from '../../api/endpoints';
+import { PLACEHOLDER_TROPHIES, SHOW_PLACEHOLDERS } from '../../constants/placeholders';
 import { RARITIES, rankProgress, rankTitle } from '../../constants/game';
-import type { Photo, Rarity } from '../../models';
+import type { ChallengeTrophy, Photo, Rarity } from '../../models';
 import { useBoardStanding } from '../../hooks/useBoardStanding';
 import { useAlbumStore } from '../../store/albumStore';
 import { useAuthStore } from '../../store/authStore';
@@ -59,9 +62,22 @@ export function ProfileScreen({ navigation }: Props) {
   const standing = useBoardStanding();
 
   const photos = useAlbumStore((s) => s.photos);
+  const albumFilters = useAlbumStore((s) => s.filters);
+  const setAlbumFilters = useAlbumStore((s) => s.setFilters);
   const cats = useAlbumStore((s) => s.cats);
   const load = useAlbumStore((s) => s.load);
   const loadCatDex = useAlbumStore((s) => s.loadCatDex);
+
+  /**
+   * The trophy case.
+   *
+   * Its own request, because your own profile is otherwise assembled entirely from stores
+   * that are already loaded — there is no `publicProfile` call here to carry it down the way
+   * there is on a stranger's. A failure is swallowed: an empty case renders as no section at
+   * all, which is the same thing a player with no wins sees, and an error banner over
+   * "challenges you have won" would be a strange thing to interrupt a profile with.
+   */
+  const [trophies, setTrophies] = useState<ChallengeTrophy[]>([]);
 
   useEffect(() => {
     void refreshUser();
@@ -83,6 +99,11 @@ export function ProfileScreen({ navigation }: Props) {
     if (!userId) return;
     void load();
     void loadCatDex();
+
+    challengeApi
+      .wins()
+      .then((result) => setTrophies(result.trophies))
+      .catch(() => setTrophies([]));
   }, [load, loadCatDex, userId]);
 
   const byTier = useMemo(() => {
@@ -216,6 +237,26 @@ export function ProfileScreen({ navigation }: Props) {
       />
 
       {/*
+        What you have won, and it is public — the same rail a visitor sees on your profile.
+        Nothing renders when the case is empty, so a player who has not won a challenge is
+        not shown a section about it.
+
+        `PLACEHOLDER_TROPHIES` is the design stand-in and is gated on one flag; see
+        `constants/placeholders.ts` for what turning it off does.
+      */}
+      <TrophyCase
+        trophies={
+          trophies.length > 0 ? trophies : SHOW_PLACEHOLDERS ? PLACEHOLDER_TROPHIES : []
+        }
+        onPress={(trophy) =>
+          navigation.navigate('ChallengesTab', {
+            screen: 'ChallengeEntries',
+            params: { challengeId: trophy.challengeId, title: trophy.title },
+          })
+        }
+      />
+
+      {/*
         The album lives here now. It gave up its slot in the tab bar to the capture
         shutter, so this is its front door — a real strip of photographs rather than a
         text row, because the album is a place you recognise by what is in it.
@@ -327,29 +368,71 @@ export function ProfileScreen({ navigation }: Props) {
 
       <SectionHeader
         title="Album breakdown"
-        description={pluralize(photos.length, 'photo')}
+        description="Tap a rarity to see those photos."
       />
 
       <Card>
         <DividedGroup>
-          {RARITIES.map((tier) => (
-            <View key={tier} style={styles.tierRow}>
-              <RarityBadge rarity={tier} />
-              <View style={styles.tierBarTrack}>
-                <View
-                  style={[
-                    styles.tierBarFill,
-                    {
-                      width: `${
-                        photos.length === 0 ? 0 : (byTier[tier] / photos.length) * 100
-                      }%`,
-                    },
-                  ]}
-                />
-              </View>
-              <Text style={[text.stat, styles.tierCount]}>{byTier[tier]}</Text>
-            </View>
-          ))}
+          {RARITIES.map((tier) => {
+            const count = byTier[tier];
+
+            return (
+              /*
+                Each row opens the album filtered to its own rarity.
+
+                The breakdown answers "how many Legendaries have I got" and then left the
+                player to go to the album and set the same filter by hand to see them — four
+                bars that read as a chart when every one of them is the name of a query the
+                album can already run.
+
+                The filter goes through the album store rather than through a route param
+                because that store is where the grid reads its filters from: `PhotoAlbumGrid`
+                takes no params, and its chip row is bound to this same `filters.tier`. So
+                setting it here means the grid opens with the chip already lit, which is what
+                tells the player *why* they are looking at a subset — and clearing it is the
+                same tap it always was.
+              */
+              <Pressable
+                key={tier}
+                style={styles.tierRow}
+                // Nothing to show, so nothing to press. A row that navigates to an empty grid
+                // reads as a broken link rather than as an honest zero.
+                disabled={count === 0}
+                onPress={() => {
+                  setAlbumFilters({ ...albumFilters, tier });
+                  navigation.navigate('PhotoAlbumGrid');
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={`${count} ${tier}`}
+                accessibilityHint={
+                  count === 0 ? undefined : `Opens your album showing only ${tier} photos`
+                }
+                accessibilityState={{ disabled: count === 0 }}
+              >
+                <RarityBadge rarity={tier} />
+                <View style={styles.tierBarTrack}>
+                  <View
+                    style={[
+                      styles.tierBarFill,
+                      {
+                        width: `${
+                          photos.length === 0 ? 0 : (count / photos.length) * 100
+                        }%`,
+                      },
+                    ]}
+                  />
+                </View>
+                <Text style={[text.stat, styles.tierCount]}>{count}</Text>
+                {/*
+                  The chevron is what makes the row look pressable at a glance. Dropped on an
+                  empty row so the affordance and the disabled state cannot disagree.
+                */}
+                {count === 0 ? null : (
+                  <CaretRight size={14} weight="bold" color={paper.textFaint} />
+                )}
+              </Pressable>
+            );
+          })}
         </DividedGroup>
       </Card>
 

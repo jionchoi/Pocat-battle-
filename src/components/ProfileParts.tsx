@@ -1,13 +1,35 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
 import { Image } from 'expo-image';
-import { Crown } from 'phosphor-react-native';
+import {
+  CloudRain,
+  Crown,
+  Moon,
+  Sparkle,
+  Sun,
+  Trophy,
+  Users,
+  type IconProps,
+} from 'phosphor-react-native';
 
 import { RarityBadge, ScoreChip } from './Badge';
 import { rankTitle, tierFor } from '../constants/game';
-import type { LeaderboardEntry, Photo } from '../models';
-import { marmalade, paper, radii, spacing, text } from '../theme';
-import { compactNumber } from '../utils/format';
+import type {
+  ChallengeIconKey,
+  ChallengeTrophy,
+  LeaderboardEntry,
+  Photo,
+} from '../models';
+import { chrome, lagoon, marmalade, paper, radii, spacing, text } from '../theme';
+import { compactNumber, pluralize } from '../utils/format';
 
 /**
  * The pieces both profiles are built from.
@@ -137,9 +159,12 @@ export const ShowcaseTile = React.memo(function ShowcaseTile({
           </View>
         ) : null}
 
+        {/* Withheld until scored, for the reason spelled out in `FeedPost`. */}
         <View style={styles.showcaseCorners} pointerEvents="none">
-          <ScoreChip score={photo.scores.total} />
-          <RarityBadge rarity={photo.tier} size="sm" compact />
+          <ScoreChip score={photo.scores.total} scored={photo.scoredAt !== null} />
+          {photo.scoredAt !== null ? (
+            <RarityBadge rarity={photo.tier} size="sm" compact />
+          ) : null}
         </View>
       </View>
     </Container>
@@ -199,6 +224,175 @@ export const BoardTrophy = React.memo(function BoardTrophy({
   );
 });
 
+/* -------------------------------------------------------------------------- */
+/* Trophy case                                                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The same glyph set the Challenges hub uses, so a challenge is recognisable on a profile as
+ * the one you entered. Kept local rather than imported from `ChallengeBanner`, which would
+ * pull the hero, its gradient and the leader card in behind it — a profile needs none of
+ * that to draw a 15pt icon.
+ */
+const TROPHY_GLYPHS: Record<ChallengeIconKey, React.ComponentType<IconProps>> = {
+  rain: CloudRain,
+  sun: Sun,
+  night: Moon,
+  rarity: Sparkle,
+  community: Users,
+  trophy: Trophy,
+};
+
+/** Wide enough for two lines of challenge title under a 4:5 crop, narrow enough that a
+ *  second tile is always visibly cut off — which is what says the rail scrolls. */
+const TROPHY_WIDTH = 132;
+
+/**
+ * Challenges this player has won.
+ *
+ * ## Why it is public, and why it is a rail of photographs
+ *
+ * Everything else on a profile is either a total or something the player chose to show. A win
+ * is neither: it was decided by the field, and it is the only claim on the screen that says
+ * this photographer beat *other people* rather than beat a threshold. So it is public on both
+ * profiles — same component, same data, same heading.
+ *
+ * The heading does not change between them. It was "Challenges @name won" on a stranger's,
+ * which is a sentence rather than a section label: it wrapped on any handle longer than a
+ * word, it pushed the count off the row, and it said something the reader already knew from
+ * the avatar six lines above it. Whose profile this is has been settled by the time anyone
+ * reaches this rail.
+ *
+ * It draws the winning photograph rather than a medal, for the reason the whole product
+ * exists: the trophy *is* the picture. A row of identical cups says nothing about which
+ * challenge was which, and a player scanning their own profile is looking for the shot — the
+ * count is already three cells along in the stat rail.
+ *
+ * ## It disappears entirely at zero
+ *
+ * No empty state, no "no wins yet" card. A section explaining that somebody has not won
+ * anything is a section about a failure, and on a stranger's profile it invites a reading of
+ * the person that the app has no business proposing. This returns null and the screen closes
+ * up around it.
+ */
+export const TrophyCase = React.memo(function TrophyCase({
+  trophies,
+  onPress,
+  style,
+}: {
+  trophies: readonly ChallengeTrophy[];
+  /** Opens the challenge's results. Omitted where there is nothing to open. */
+  onPress?: (trophy: ChallengeTrophy) => void;
+  style?: StyleProp<ViewStyle>;
+}) {
+  if (trophies.length === 0) return null;
+
+  return (
+    <View style={[styles.case, style]}>
+      {/*
+        Glyph and title on the left, count hard right — the same three-part row every
+        `SectionHeader` in the product draws. It used to be three items sharing one gap, so
+        "3 wins" sat wherever the title happened to end and drifted from card to card; a
+        count that moves with the length of the word beside it reads as a typo.
+      */}
+      <View style={styles.caseHead}>
+        <Trophy size={15} weight="fill" color={lagoon[600]} />
+        <Text style={[text.h3, styles.caseTitle]} numberOfLines={1}>
+          Challenges won
+        </Text>
+        <Text style={[text.caption, styles.trophySub]}>
+          {pluralize(trophies.length, 'win')}
+        </Text>
+      </View>
+
+      {/*
+        A rail rather than a wrapping grid. Wins arrive one a week at most, so the set stays
+        small for a long time, and a grid holding one tile beside two empty columns is a worse
+        picture of "you have won something" than a short rail is. It also keeps the section one
+        row tall however full the case gets, which is what stops a decorated player's profile
+        pushing their photographs off the screen.
+      */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.caseRail}
+      >
+        {trophies.map((trophy) => (
+          <TrophyTile key={trophy.challengeId} trophy={trophy} onPress={onPress} />
+        ))}
+      </ScrollView>
+    </View>
+  );
+});
+
+/**
+ * One win: the photograph, the challenge it took, and what it beat.
+ *
+ * The gold pill is the only use of gold in the product, and it is deliberate — first place is
+ * the one state allowed to look like first place. Flat, not a gradient or a shine, so it stays
+ * a label rather than becoming a sticker.
+ */
+const TrophyTile = React.memo(function TrophyTile({
+  trophy,
+  onPress,
+}: {
+  trophy: ChallengeTrophy;
+  onPress?: (trophy: ChallengeTrophy) => void;
+}) {
+  const Glyph = TROPHY_GLYPHS[trophy.icon ?? 'trophy'] ?? Trophy;
+  const Container = onPress ? Pressable : View;
+
+  return (
+    <Container
+      onPress={onPress ? () => onPress(trophy) : undefined}
+      accessibilityRole={onPress ? 'button' : undefined}
+      accessibilityLabel={`Won ${trophy.title}${
+        trophy.score !== null ? `, scored ${trophy.score}` : ''
+      }, ${pluralize(trophy.entrants, 'entrant')}`}
+      style={styles.trophyTile}
+    >
+      <View style={styles.trophyFrame}>
+        <Image
+          source={trophy.photoUrl || undefined}
+          contentFit="cover"
+          transition={200}
+          style={StyleSheet.absoluteFill}
+          accessible={false}
+        />
+
+        {/*
+          The winning photograph can be gone: `winning_photo_id` is `on delete set null`, and
+          a player may delete the photo they won with. The win outlives it, so the tile falls
+          back to the challenge's own glyph rather than to a hole.
+        */}
+        {!trophy.photoUrl ? (
+          <View style={styles.trophyMissing}>
+            <Glyph size={24} weight="fill" color={paper.textFaint} />
+          </View>
+        ) : null}
+
+        <View style={styles.trophyRibbon}>
+          <Trophy size={10} weight="fill" color={chrome.fill} />
+          <Text style={[text.eyebrow, styles.trophyRibbonText]}>1st</Text>
+        </View>
+
+        {trophy.score !== null ? (
+          <View style={styles.trophyScore}>
+            <Text style={[text.statSm, styles.onPhoto]}>{trophy.score}</Text>
+          </View>
+        ) : null}
+      </View>
+
+      <Text style={[text.caption, styles.trophyTitle]} numberOfLines={2}>
+        {trophy.title}
+      </Text>
+      <Text style={[text.captionSm, styles.trophySub]} numberOfLines={1}>
+        {`${compactNumber(trophy.entrants)} entered`}
+      </Text>
+    </Container>
+  );
+});
+
 export const profileStyles = StyleSheet.create({
   head: {
     flexDirection: 'row',
@@ -217,6 +411,76 @@ export const profileStyles = StyleSheet.create({
 });
 
 const styles = StyleSheet.create({
+  /* ------------------------------ trophy case ------------------------------ */
+  case: {
+    marginTop: spacing.lg,
+    gap: spacing.sm,
+  },
+  caseHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  /** Takes the slack, which is what pins the count to the right edge of the row. */
+  caseTitle: {
+    flex: 1,
+    color: paper.text,
+  },
+  caseRail: {
+    gap: spacing.sm,
+    // The screen is already gutter-padded, so the first tile is flush and only the tail
+    // needs air — otherwise the last tile sits hard against the window edge.
+    paddingRight: spacing.xs,
+  },
+  trophyTile: {
+    width: TROPHY_WIDTH,
+    gap: 3,
+  },
+  trophyFrame: {
+    width: TROPHY_WIDTH,
+    aspectRatio: 4 / 5,
+    borderRadius: radii.lg,
+    overflow: 'hidden',
+    backgroundColor: paper.sunken,
+  },
+  trophyMissing: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  trophyRibbon: {
+    position: 'absolute',
+    top: 7,
+    left: 7,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: radii.full,
+    backgroundColor: '#F2C14E',
+  },
+  trophyRibbonText: {
+    color: chrome.fill,
+    fontSize: 9,
+    letterSpacing: 0.8,
+  },
+  trophyScore: {
+    position: 'absolute',
+    right: 7,
+    bottom: 7,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radii.full,
+    backgroundColor: chrome.onPhoto,
+  },
+  trophyTitle: {
+    color: paper.text,
+  },
+  trophySub: {
+    color: paper.textFaint,
+  },
+
   trophy: {
     marginTop: spacing.lg,
     /**

@@ -21,6 +21,10 @@ router.get('/active', authenticate, challengesController.active);
  */
 router.get('/eligible-photos', authenticate, challengesController.eligiblePhotos);
 
+/** The caller's own wins, for the trophy case on their profile. Declared above `/:challengeId`
+ *  for the same reason `/eligible-photos` is. */
+router.get('/wins', authenticate, challengesController.wins);
+
 router.get('/:challengeId/entries', authenticate, uuidParam('challengeId'), challengesController.entries);
 
 /** Enters a photo, or moves an existing entry onto it. Also shares it to the feed. */

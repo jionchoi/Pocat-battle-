@@ -17,10 +17,20 @@
  */
 export const SCORE_SCALE = 1000;
 
-/** The three reactions. Mirrors the client's `Reaction` and the column's check constraint. */
-export type Reaction = 'laugh' | 'love' | 'wow';
+/**
+ * The five reactions. Mirrors the client's `Reaction`, the order its picker draws them in,
+ * and the `votes_reaction_known` check constraint on the column.
+ *
+ * `laugh`, `love` and `wow` were the original three and keep their spellings — there are rows
+ * in `votes` holding those strings, and renaming one would silently orphan them. `melt` and
+ * `fire` were added beside them by the 2026-08-28 migration.
+ *
+ * All five are positive, and that is a property of the design rather than an accident of
+ * which ones got picked: there is no downvote to brigade with.
+ */
+export type Reaction = 'love' | 'laugh' | 'wow' | 'melt' | 'fire';
 
-export const REACTIONS: readonly Reaction[] = ['laugh', 'love', 'wow'];
+export const REACTIONS: readonly Reaction[] = ['love', 'laugh', 'wow', 'melt', 'fire'];
 
 export function isReaction(value: unknown): value is Reaction {
   return typeof value === 'string' && (REACTIONS as readonly string[]).includes(value);
@@ -28,7 +38,9 @@ export function isReaction(value: unknown): value is Reaction {
 
 /** A zeroed tally, so a photo with no reactions still answers the shape the client expects. */
 export function emptyReactions(): Record<Reaction, number> {
-  return { laugh: 0, love: 0, wow: 0 };
+  // Built from `REACTIONS` rather than written out, so adding a sixth cannot leave a hole
+  // that only shows up as an undefined tally on a photograph nobody has reacted to.
+  return Object.fromEntries(REACTIONS.map((key) => [key, 0])) as Record<Reaction, number>;
 }
 
 /**

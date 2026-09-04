@@ -10,7 +10,19 @@
 /** Photo quality tier, derived server-side from `scores.total`. Drives the card bezel. */
 export type Rarity = 'Common' | 'Rare' | 'Epic' | 'Legendary';
 
-export type Reaction = 'laugh' | 'love' | 'wow';
+/**
+ * What a reader can say about somebody else's photograph.
+ *
+ * Five, and all five are positive — there is no downvote and there is no key here that
+ * could become one. That is a structural decision rather than a moderation policy: you
+ * cannot brigade with buttons that do not exist, so the worst thing a player can do to a
+ * photo is scroll past it.
+ *
+ * `laugh`, `love` and `wow` are the original three and keep their names, because rows in
+ * `votes` are already written with those strings. `melt` and `fire` were added beside them;
+ * the column's check constraint lists all five (see the 2026-08-28 migration).
+ */
+export type Reaction = 'love' | 'laugh' | 'wow' | 'melt' | 'fire';
 
 /**
  * Pose/action classes the scoring pipeline recognises (README 9.2, "pose rarity").
@@ -89,6 +101,12 @@ export interface PhotoScores {
   total: number;
 }
 
+/** Who unlocked a score. Just enough to name somebody and open their profile. */
+export interface RevealCredit {
+  id: string;
+  username: string;
+}
+
 export interface Photo {
   id: string;
   ownerId: string;
@@ -102,6 +120,29 @@ export interface Photo {
   capturedAt: string;
   capturedLocation: GeoPoint;
   voteCount: number;
+  /**
+   * Paws given to this photograph by other players.
+   *
+   * The currency's only public number. It sits beside `voteCount` and is deliberately not
+   * like it: reactions are capped at one per person and feed `communityScore`, which is what
+   * the leaderboards rank on, while paws are uncapped per person and this count feeds
+   * **nothing at all**. That is what makes many-from-one-person safe here and unsafe there.
+   *
+   * Note the boundary: *giving* moves no ranked number, which is what this field is about.
+   * *Spending* a paw on a reveal does earn XP — a different act, and it does not touch this.
+   */
+  pawCount: number;
+  /**
+   * Who paid to unlock this score, when it was not the photographer.
+   *
+   * **Null is the ordinary case** and means there is nothing to draw: the photographer
+   * revealed their own score, or it has not been revealed at all. It is only ever set when
+   * somebody else spent paws on it, which is exactly when a credit is worth showing.
+   *
+   * The server decides this, not the screen — `revealCreditFor` nulls it out for the owner's
+   * own reveals so the feed and the album cannot disagree about whether a credit exists.
+   */
+  revealedBy: RevealCredit | null;
   submittedToChallengeId?: string;
 
   /* --- added for rendering; all derived server-side --- */
@@ -164,6 +205,18 @@ export interface Photo {
 export interface PhotoWithAuthor extends Photo {
   author: Pick<User, 'id' | 'username' | 'avatarUrl' | 'photographerRank'>;
 }
+
+/**
+ * What `GET /photos/:id` answers with.
+ *
+ * The owner gets the album serialization and everyone else gets the feed card, so `author`
+ * is present exactly when you are *not* the owner — which is also exactly when the detail
+ * screen needs it, because that is when there is somebody else's profile to offer.
+ *
+ * Optional rather than two types the caller has to discriminate: every field the screen
+ * draws is on `Photo`, and the author is the one thing it has to check for anyway.
+ */
+export type PhotoDetail = Photo & Partial<Pick<PhotoWithAuthor, 'author'>>;
 
 /* ------------------------------------------------------------------ */
 /* Cat Dex                                                            */
@@ -635,6 +688,34 @@ export interface LeaderboardEntry {
   topPhotoUrl: string | null;
 }
 
+/**
+ * A challenge this player won, as a profile draws it.
+ *
+ * Public by design. Everything else a profile shows about somebody is either a total (how
+ * many photos, how many cats) or something they chose to put on show; a win is neither —
+ * it is a *result*, decided by the field, and hiding it would make the challenge system a
+ * private scoreboard. It is also the only thing on a profile that says a player beat other
+ * people rather than beat a threshold.
+ *
+ * The photograph may be gone: `winning_photo_id` is `on delete set null`, and a player can
+ * delete a photo they won with. The win outlives it, so `photoUrl` degrades to empty rather
+ * than the whole trophy disappearing.
+ */
+export interface ChallengeTrophy {
+  challengeId: string;
+  title: string;
+  /** When the challenge closed, ISO 8601. Newest first, as the server sends them. */
+  wonAt: string;
+  /** The winning photograph, or '' if it has since been deleted. */
+  photoUrl: string;
+  /** What it scored. Null on a challenge judged by reactions, and on an unscored photo. */
+  score: number | null;
+  tier: Rarity | null;
+  icon: ChallengeIconKey | null;
+  /** How many entered. Context for what the win was worth — beating six is not beating six hundred. */
+  entrants: number;
+}
+
 export interface PublicProfile {
   user: User;
   /** The photos this player chose to showcase, best-first. */
@@ -653,6 +734,14 @@ export interface PublicProfile {
   catsDiscovered: number;
   bestScore: number;
   challengeWins: number;
+  /**
+   * The wins themselves, newest first, not just the count beside them in the stat rail.
+   *
+   * Optional so a client running against a server that predates the field renders an empty
+   * trophy case rather than throwing — the profile is the last screen that should fail hard
+   * over a section it can simply not draw.
+   */
+  challengeTrophies?: ChallengeTrophy[];
 }
 
 /* ------------------------------------------------------------------ */
@@ -673,6 +762,17 @@ export interface ShopItem {
   owned: boolean;
   /** Cosmetics can gate on rank — cosmetic progression, never power. */
   requiredRank: number;
+  /**
+   * What this costs in paws, or `null` for "not sold for paws".
+   *
+   * Null is the default and the common case: an item is only paw-purchasable because somebody
+   * authored a number for it on the server. Independent of `priceLabel` — an item may carry
+   * both a money price and a paw price, which are two doors to the same thing.
+   *
+   * Never set on Pro, and never on anything rank-gated. Both are enforced server-side; the
+   * screen should not be the only thing stopping it.
+   */
+  pawPrice: number | null;
 }
 
 export interface ApiError {

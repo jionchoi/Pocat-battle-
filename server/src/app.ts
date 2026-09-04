@@ -12,6 +12,7 @@ import feedRouter from './routes/feed.js';
 import challengesRouter from './routes/challenges.js';
 import authRouter from './routes/auth.js';
 import shopRouter from './routes/shop.js';
+import pawsRouter from './routes/paws.js';
 import { friendsRouter, leaderboardRouter, usersRouter } from './routes/social.js';
 
 export const app = express();
@@ -79,6 +80,7 @@ app.use('/feed', feedRouter);
 app.use('/challenges', readLimit, challengesRouter);
 app.use('/auth', readLimit, authRouter);
 app.use('/shop', readLimit, shopRouter);
+app.use('/paws', readLimit, pawsRouter);
 app.use('/leaderboard', readLimit, leaderboardRouter);
 app.use('/users', readLimit, usersRouter);
 app.use('/friends', readLimit, friendsRouter);

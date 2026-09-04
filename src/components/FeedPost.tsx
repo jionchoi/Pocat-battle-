@@ -14,7 +14,7 @@ import { Eye } from 'phosphor-react-native';
 import type { PhotoWithAuthor, Reaction } from '../models';
 import { Avatar } from './Avatar';
 import { RarityBadge, ScoreChip } from './Badge';
-import { VoteRow } from './VoteButton';
+import { ReactionBar } from './ReactionBar';
 import {
   chrome,
   contextColors,
@@ -76,16 +76,21 @@ export const FeedPost = React.memo(function FeedPost({
   onPress,
   onPressAuthor,
   onReact,
+  onGivePaw,
   style,
 }: {
   photo: PhotoWithAuthor;
   myReaction: Reaction | null;
   index?: number;
-  /** You cannot react to your own photo — the server rejects it too. */
+  /**
+   * You cannot react to your own photo, and you cannot give it paws either — the server
+   * rejects both. It gates the whole bar rather than the heart alone.
+   */
   isMine?: boolean;
   onPress: () => void;
   onPressAuthor: () => void;
   onReact: (reaction: Reaction) => void;
+  onGivePaw: () => void;
   style?: StyleProp<ViewStyle>;
 }) {
   const c = contextColors('paper');
@@ -170,33 +175,39 @@ export const FeedPost = React.memo(function FeedPost({
             </View>
           ) : null}
 
+          {/*
+            Both withheld until the photograph has been judged.
+
+            An unscored row carries zeroes and a `tier` of 'Common' because the client's type
+            wants values there — so drawing them unguarded put a confident "0" and the worst
+            possible rarity on every photo still waiting its turn. `ScoreChip` already draws a
+            lock when told; it simply was not being told here.
+          */}
           <View style={styles.corners} pointerEvents="none">
-            <ScoreChip score={photo.scores.total} />
-            <RarityBadge rarity={photo.tier} size="sm" />
+            <ScoreChip score={photo.scores.total} scored={photo.scoredAt !== null} />
+            {photo.scoredAt !== null ? <RarityBadge rarity={photo.tier} size="sm" /> : null}
           </View>
         </Animated.View>
       </Pressable>
 
       {/*
-        The reaction bar is the point of the post. Three buttons rather than one heart,
-        because the mix is the interesting part — a photo that made two hundred people
-        laugh is a different photo from one that made two hundred go "wow", and a single
-        total throws that away.
+        The reaction bar is the point of the post, and it gets the whole row.
+
+        It used to be three reaction pills and a view count crammed onto one line, which
+        left each control about a thumb-width of space and put the least interesting number
+        on the post — how many people scrolled past it — in the same visual rank as the
+        thing you are being invited to press. The bar now owns the row end to end, and the
+        views have gone down to the metadata line where the badges already were.
       */}
-      <View style={styles.actions}>
-        <VoteRow
-          reactions={photo.reactions}
-          myReaction={myReaction}
-          onReact={onReact}
-          disabled={isMine}
-        />
-        <View style={styles.views}>
-          <Eye size={13} weight="regular" color={c.textFaint} />
-          <Text style={[text.statSm, { color: c.textFaint }]}>
-            {compactNumber(photo.viewCount)}
-          </Text>
-        </View>
-      </View>
+      <ReactionBar
+        photoId={photo.id}
+        reactions={photo.reactions}
+        myReaction={myReaction}
+        onReact={onReact}
+        pawCount={photo.pawCount}
+        onGivePaw={onGivePaw}
+        disabled={isMine}
+      />
 
       {photo.caption ? (
         <Text style={[text.body, styles.caption, { color: c.text }]} numberOfLines={2}>
@@ -205,11 +216,24 @@ export const FeedPost = React.memo(function FeedPost({
         </Text>
       ) : null}
 
-      {photo.badges.length > 0 ? (
-        <Text style={[text.captionSm, { color: c.textFaint }]} numberOfLines={1}>
-          {photo.badges.join(' · ')}
+      {/*
+        One quiet line closing the post: what the scorer noticed, and how many people have
+        seen it. Both are footnotes to the photograph, so they read as one footnote.
+      */}
+      <View style={styles.meta}>
+        <Eye size={12} weight="regular" color={c.textFaint} />
+        <Text style={[text.statSm, { color: c.textFaint }]}>
+          {compactNumber(photo.viewCount)}
         </Text>
-      ) : null}
+        {photo.badges.length > 0 ? (
+          <Text
+            style={[text.captionSm, styles.metaBadges, { color: c.textFaint }]}
+            numberOfLines={1}
+          >
+            {`· ${photo.badges.join(' · ')}`}
+          </Text>
+        ) : null}
+      </View>
     </Animated.View>
   );
 });
@@ -251,16 +275,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: spacing.xxs,
   },
-  actions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
-  },
-  views: {
+  meta: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
+  },
+  metaBadges: {
+    flexShrink: 1,
   },
   caption: {
     // The nickname runs inline with the caption the way a handle does on a social post —

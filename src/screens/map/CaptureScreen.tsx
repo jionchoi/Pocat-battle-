@@ -1,9 +1,11 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 import { CameraView } from 'expo-camera';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
+import { useStatusBarStyle } from '../../components/Screen';
 import { CaptureOverlay } from '../../components/CaptureOverlay';
 import { CaptureFilterLayer } from '../../components/CaptureFilterLayer';
 import { ScoringOverlay } from '../../components/ScoringOverlay';
@@ -38,6 +40,9 @@ import type { MapStackParamList } from '../../navigation/types';
  */
 
 type Nav = NativeStackNavigationProp<MapStackParamList, 'Capture'>;
+
+/** How much of the zoom range one unit of pinch covers. See `pinch` below. */
+const ZOOM_PER_SCALE = 0.1;
 
 export function CaptureScreen() {
   const navigation = useNavigation<Nav>();
@@ -108,11 +113,47 @@ export function CaptureScreen() {
   const [pictureSize, setPictureSize] = useState<string | undefined>(undefined);
 
   /**
-   * Latched, because setting `pictureSize` reconfigures the capture session and fires
-   * `onCameraReady` again. Without this the screen would ask, set, re-ready, ask again —
-   * a reconfiguration loop on the one screen that has to be live and responsive.
+   * Which physical lens the preview runs on. iOS only; `undefined` everywhere else.
+   *
+   * **This is why the viewfinder looked like 0.5x.** Left unset, expo-camera falls back to
+   * `AVCaptureDevice.systemPreferredCamera`, and on a multi-camera iPhone that is routinely a
+   * *virtual* device — `builtInTripleCamera` or `builtInDualWideCamera`, one logical camera
+   * that switches between the real ones as you zoom. A virtual device's zoom factor 1.0 is its
+   * **widest constituent lens**, which is the ultra-wide. So the camera opened on 0.5x and
+   * nothing on this screen said otherwise; the stock Camera app opens that same device at zoom
+   * factor 2.0 and calls it "1x", which is why the two disagreed on a phone where they are
+   * plainly using the same hardware.
+   *
+   * Pinning the plain wide-angle lens fixes it at the source rather than by dialling in a
+   * zoom: `zoom` is a fraction of the device's *maximum* magnification, so the value that
+   * means 1x is a different tiny number on every phone and moves with whichever lens the
+   * virtual device has switched to.
    */
-  const sizeChosen = useRef(false);
+  const [selectedLens, setSelectedLens] = useState<string | undefined>(undefined);
+
+  /**
+   * Magnification, as expo-camera wants it: a fraction of the device's own maximum, not a
+   * multiplier. `0` is the lens wide open, which is where this screen opens.
+   *
+   * Held in state rather than in a shared value because `zoom` is an ordinary prop on
+   * `CameraView` — there is no native animated path to it, so a worklet driving this would
+   * still have to hop to JS to set it. `.runOnJS(true)` on the gesture below says that
+   * outright instead of pretending otherwise.
+   */
+  const [zoom, setZoom] = useState(0);
+
+  /** The live value, readable from a gesture callback that must not close over stale state. */
+  const zoomNow = useRef(0);
+
+  /** Where the current pinch started from, so successive pinches accumulate. */
+  const zoomBase = useRef(0);
+
+  /**
+   * Latched, because setting `pictureSize` or `selectedLens` reconfigures the capture session
+   * and fires `onCameraReady` again. Without this the screen would ask, set, re-ready, ask
+   * again — a reconfiguration loop on the one screen that has to be live and responsive.
+   */
+  const configured = useRef(false);
 
   /**
    * Whether this screen is the one being looked at.
@@ -170,18 +211,42 @@ export function CaptureScreen() {
 
         if (!shot?.uri) throw new Error('The camera did not return a photo.');
 
+        /*
+         * Freeze the viewfinder the instant the frame exists.
+         *
+         * Without this the preview stayed live under the scoring overlay for the whole of the
+         * upload and the scoring call, so the screen kept moving with the phone long after the
+         * photograph had been taken — and a player reads a moving viewfinder as "still
+         * shooting" and holds the pose for it. The shot is already in hand by this line.
+         *
+         * After `takePictureAsync` and not before, which is not a stylistic choice: Android's
+         * `pausePreview` is `cameraProvider.unbindAll()`, so it tears down the `ImageCapture`
+         * use case along with the preview. Pausing on the tap would cancel the capture it is
+         * supposed to be freezing. iOS only disables the preview layer's connection and would
+         * not have minded either way.
+         *
+         * Unawaited, and it must be: this is a cosmetic freeze on the way to the reveal, and
+         * making the upload queue behind it would delay the thing the player is waiting for.
+         */
+        void camera.current?.pausePreview();
+
         if (!userId) throw new Error('You are not signed in.');
 
         /*
          * Straight to storage, not through the API.
          *
-         * `uploadCapture` downscales and puts the bytes in the bucket under this player's
-         * own folder, which the storage policy is what actually enforces. The request that
+         * `uploadCapture` crops to 16:9, downscales, and puts the bytes in the bucket under
+         * this player's own folder, which the storage policy is what actually enforces. The
+         * dimensions travel with the uri because the crop needs them and only the camera
+         * knows them. The request that
          * follows carries a path — a couple of hundred bytes instead of a couple of
          * megabytes of base64, and the server fetches the image from storage on a
          * connection that is not a phone on mobile data.
          */
-        const uploaded = await uploadCapture(shot.uri, userId);
+        const uploaded = await uploadCapture(
+          { uri: shot.uri, width: shot.width, height: shot.height },
+          userId
+        );
 
         // The downscaled copy is what the reveal renders and what "Save to phone" writes.
         attachLocalPhoto(uploaded.localUri);
@@ -305,6 +370,27 @@ export function CaptureScreen() {
   useFocusEffect(
     useCallback(() => {
       resetCapture();
+
+      /*
+       * Un-freeze, in case the last visit left the preview paused.
+       *
+       * The camera is paused on every shutter and this screen is not unmounted when it is
+       * navigated away from — so a capture that ended in a rejection, or a retake arriving
+       * back here, would otherwise find a still image where the viewfinder should be. Cheap
+       * and idempotent when nothing was paused.
+       */
+      void camera.current?.resumePreview();
+
+      /*
+       * Back to 1x, the way opening a camera app puts you back at 1x. Zoom is a framing
+       * decision made for one photograph, and inheriting the last one silently would mean a
+       * player who zoomed right in once finds every later session already zoomed and no
+       * indicator on the screen saying why.
+       */
+      zoomNow.current = 0;
+      zoomBase.current = 0;
+      setZoom(0);
+
       // Cleared here rather than in `submit`'s `finally`, which cannot run on the path that
       // navigates away — see the note there. A latch that outlives one capture silently
       // swallows every shutter press after it.
@@ -338,12 +424,107 @@ export function CaptureScreen() {
     if (locationPermission === 'undetermined') void requestLocation();
   }, [locationPermission, requestLocation]);
 
+  /**
+   * Pinch to zoom.
+   *
+   * `scale` counts from 1 at the moment the two fingers land, so the pinch is applied as a
+   * *delta* onto whatever the zoom already was — `zoomBase` is that starting point, committed
+   * on release. Reading the state variable here instead would re-anchor every gesture to
+   * whatever React last rendered and make the second pinch fight the first.
+   *
+   * ## On the sensitivity
+   *
+   * `zoom` is a fraction of a maximum this library does not expose, and that maximum is not
+   * comparable across phones — an iPhone's wide lens reports a digital ceiling north of 100x
+   * while a typical Android main camera reports something closer to 10x. So the same fraction
+   * is a different magnification on different hardware, and no constant here can fix that.
+   *
+   * What the constant *can* do is make an ordinary pinch cover an ordinary range: a comfortable
+   * two-finger spread is about `scale = 3`, which moves the zoom by 0.2. Anything further is
+   * reachable by pinching again, the way it is on a real camera app, because the base
+   * accumulates. Tune it here if it feels slow or twitchy on the phones you test on.
+   */
+  const pinch = useMemo(
+    () =>
+      Gesture.Pinch()
+        /*
+         * Not a worklet. The one thing this gesture does is set a React prop, which happens on
+         * the JS thread no matter which thread computed it — so hopping to the UI thread would
+         * buy a `runOnJS` per frame and nothing else.
+         */
+        .runOnJS(true)
+        .onUpdate((event) => {
+          const next = Math.min(
+            1,
+            Math.max(0, zoomBase.current + (event.scale - 1) * ZOOM_PER_SCALE)
+          );
+          zoomNow.current = next;
+          setZoom(next);
+        })
+        .onEnd(() => {
+          zoomBase.current = zoomNow.current;
+        }),
+    []
+  );
+
   const close = useCallback(() => {
     resetCapture();
     navigation.goBack();
   }, [navigation, resetCapture]);
 
+  /**
+   * Asks the camera what lenses it has and what sizes it can shoot, and takes the best of each.
+   *
+   * Runs once per mount, after the session is live — neither list exists before then. Every
+   * failure here is non-fatal on purpose: unset props are exactly the state this screen was in
+   * before, so the worst case is the old behaviour rather than a camera that will not open. A
+   * capture is never blocked on this.
+   *
+   * The lens goes first. It decides which device the session is reading from, and the picture
+   * sizes are a property of that session — so choosing a size against the lens we are about to
+   * replace would be answering the question with the wrong camera.
+   */
+  const configureCamera = useCallback(async () => {
+    if (configured.current) return;
+    configured.current = true;
+
+    /*
+     * iOS only, and guarded rather than caught.
+     *
+     * `getAvailableLenses` is not defined in the Android module at all, so off iOS this is not
+     * a call that returns nothing — it is a call that rejects. Same story for the
+     * `selectedLens` prop, which is why it stays `undefined` there.
+     */
+    if (Platform.OS === 'ios') {
+      try {
+        const lenses = await camera.current?.getAvailableLensesAsync();
+        const lens = preferredBackLens(lenses ?? []);
+        if (lens) setSelectedLens(lens);
+      } catch {
+        // Left unset — back to the system's preferred camera, which is where this started.
+      }
+    }
+
+    try {
+      const sizes = await camera.current?.getAvailablePictureSizesAsync();
+      const best = largestPictureSize(sizes ?? []);
+      if (best) setPictureSize(best);
+    } catch {
+      // Left unset. See above — this degrades to the previous behaviour, not to a failure.
+    }
+  }, []);
+
   /* ------------------------------ permissions ----------------------------- */
+
+  /*
+   * Light glyphs in the notch, because everything behind them is a live camera — and the
+   * permission gate below it is the same black surface.
+   *
+   * This screen does not render `Screen`, which is where every other surface picks its status
+   * bar style up from. Applied on focus rather than on mount so that coming back from the
+   * album — already mounted, no second mount to hook — still repaints the clock white.
+   */
+  useStatusBarStyle('light');
 
   if (!cameraPermission.granted) {
     return (
@@ -370,27 +551,6 @@ export function CaptureScreen() {
     );
   }
 
-  /**
-   * Asks the camera what it can shoot, and takes the biggest.
-   *
-   * Runs once per mount, after the session is live — the list is not available before then.
-   * Failure is non-fatal on purpose: an unset `pictureSize` is exactly the state this screen
-   * was in before, so the worst case is the old behaviour rather than a camera that will not
-   * open. A capture is never blocked on this.
-   */
-  const chooseLargestPictureSize = useCallback(async () => {
-    if (sizeChosen.current) return;
-    sizeChosen.current = true;
-
-    try {
-      const sizes = await camera.current?.getAvailablePictureSizesAsync();
-      const best = largestPictureSize(sizes ?? []);
-      if (best) setPictureSize(best);
-    } catch {
-      // Left unset. See above — this degrades to the previous behaviour, not to a failure.
-    }
-  }, []);
-
   /* -------------------------------- camera -------------------------------- */
 
   /** Shutter fired, verdict not yet on screen. `revealed` is the ring's closing frame. */
@@ -399,29 +559,59 @@ export function CaptureScreen() {
 
   return (
     <View style={styles.root}>
-      <CameraView
-        ref={camera}
-        style={StyleSheet.absoluteFill}
-        facing="back"
-        pictureSize={pictureSize}
-        onCameraReady={() => {
-          setReady(true);
-          void chooseLargestPictureSize();
-        }}
-      />
-
       {/*
-        The filter, composited straight onto the preview and onto nothing else.
+        Light glyphs in the notch, because everything behind them is a live camera.
 
-        Order is the whole of it: this sits directly above `CameraView` and below everything
-        that follows, so it grades the photograph and leaves the chrome alone. The grain below
-        is film texture and belongs on top of a grade, which is also the order a darkroom
-        would put them in.
+        This screen does not render `Screen`, which is where every other surface picks its
+        status bar style up from — so it inherited whatever the last paper screen set, and the
+        clock and the battery were drawn in black over the viewfinder.
       */}
-      <CaptureFilterLayer filterId={filterId} />
+      {/*
+        The viewfinder, edge to edge.
 
-      {/* Fixed grain overlay above the preview. Never attached to a scroll container. */}
-      <View pointerEvents="none" style={styles.grain} />
+        Everything that grades or textures the preview lives inside this box rather than
+        alongside it, so a filter cannot reach the chrome. See `styles.viewfinder` for why the
+        preview covers the screen while the file it produces does not.
+      */}
+      <GestureDetector gesture={pinch}>
+        <View style={styles.viewfinder}>
+          <CameraView
+            ref={camera}
+            style={StyleSheet.absoluteFill}
+            facing="back"
+            pictureSize={pictureSize}
+            selectedLens={selectedLens}
+            zoom={zoom}
+            /*
+             * Autofocus, and it is `'off'` on purpose.
+             *
+             * The values read backwards: in expo-camera `'on'` means focus once and then lock,
+             * `'off'` means focus continuously whenever the scene asks for it. A camera
+             * pointed at a cat is pointed at the subject least likely to hold still while a
+             * lock is held, so continuous is the mode this screen wants. The naming is the
+             * library's.
+             */
+            autofocus="off"
+            onCameraReady={() => {
+              setReady(true);
+              void configureCamera();
+            }}
+          />
+
+          {/*
+            The filter, composited straight onto the preview and onto nothing else.
+
+            Order is the whole of it: this sits directly above `CameraView` and below
+            everything that follows, so it grades the photograph and leaves the chrome alone.
+            The grain below is film texture and belongs on top of a grade, which is also the
+            order a darkroom would put them in.
+          */}
+          <CaptureFilterLayer filterId={filterId} />
+
+          {/* Fixed grain overlay above the preview. Never attached to a scroll container. */}
+          <View pointerEvents="none" style={styles.grain} />
+        </View>
+      </GestureDetector>
 
       {/*
         The camera's controls exist while there is a camera to control. Once the shutter
@@ -442,7 +632,15 @@ export function CaptureScreen() {
       )}
 
       {phase === 'rejected' ? (
-        <RejectionNotice onRetry={resetCapture} onClose={close} />
+        <RejectionNotice
+          onRetry={() => {
+            // The shutter paused the preview on the way in. Trying again has to give the
+            // camera back, or "Try again" hands the player a photograph of a frozen frame.
+            void camera.current?.resumePreview();
+            resetCapture();
+          }}
+          onClose={close}
+        />
       ) : null}
     </View>
   );
@@ -525,19 +723,70 @@ export function largestPictureSize(sizes: readonly string[]): string | undefined
   return best;
 }
 
+/**
+ * The back lens to run the viewfinder on, out of what `getAvailableLensesAsync` reports.
+ *
+ * iOS names these for a person to read rather than for a program to parse — they are
+ * `AVCaptureDevice.localizedName`, which is what expo-camera matches `selectedLens` against.
+ * For the back camera the vocabulary is small and stable:
+ *
+ *   "Back Camera"             the wide angle. 1x, and the one we want.
+ *   "Back Ultra Wide Camera"  0.5x.
+ *   "Back Telephoto Camera"   2x or more.
+ *   "Back Dual Camera"        virtual: wide + telephoto.
+ *   "Back Dual Wide Camera"   virtual: ultra wide + wide.
+ *   "Back Triple Camera"      virtual: all three.
+ *
+ * The three virtual devices are the trap this exists to avoid — see the note on `selectedLens`.
+ * Each is one logical camera spanning several real ones, and its zoom factor 1.0 sits at the
+ * *widest* lens it contains, so a session left on a triple camera opens at 0.5x.
+ *
+ * So: take the plain wide angle if it is offered, and otherwise take nothing and leave the
+ * default alone. Falling back to a telephoto or an ultra-wide because the wide one was missing
+ * would trade a framing that is wrong for one that is differently wrong — and a phone with no
+ * `builtInWideAngleCamera` at the back does not exist. `undefined` is the honest answer.
+ *
+ * Matching is exact rather than a substring test, because every virtual device's name contains
+ * a real lens's name: "Back Dual Wide Camera" contains "Wide Camera", while `.includes('Back
+ * Camera')` matches none of them at all despite looking like it should match them all.
+ */
+export function preferredBackLens(lenses: readonly string[]): string | undefined {
+  return lenses.find((lens) => lens.trim().toLowerCase() === 'back camera');
+}
+
 const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: arena.bg,
+  },
+  /**
+   * The preview, covering the screen.
+   *
+   * Both platforms scale the camera frame to *fill* the view they are given — expo-camera
+   * hardcodes `videoGravity = .resizeAspectFill` on iOS, and Android's `PreviewView` defaults
+   * to `ScaleType.FILL_CENTER` — so a full-screen box turns a 4:3 sensor frame into a ~19.5:9
+   * window onto it, trimming the sides.
+   *
+   * **That trim is the reason the saved file is cropped too.** Left alone it is the screen
+   * lying about the photograph: the preview shows a 19.5:9 slice and `takePictureAsync` hands
+   * back the whole 4:3 frame, so every capture came out substantially wider than it was
+   * framed. `uploadCapture` now crops to 16:9, which is a picture's shape rather than a
+   * phone's and sits close enough to this window that the file is very nearly what was on the
+   * glass. Preview and file are reconciled there, not here — see `sixteenNineCrop`.
+   */
+  viewfinder: {
+    ...StyleSheet.absoluteFillObject,
     /*
-     * Contains the filter's blend mode.
+     * Contains the filter's blend mode, and clips it to the picture.
      *
      * `mixBlendMode` composites against everything painted beneath it in the same stacking
      * context. Without an explicit isolate that context is whatever ancestor happens to
      * establish one, so a `saturation` layer could reach past the camera and drain the colour
-     * from the tab bar behind this screen. This makes the boundary the screen itself.
+     * from the tab bar behind this screen. This makes the boundary the viewfinder itself,
+     * which is also the only thing on the screen a filter has any business touching.
      */
     isolation: 'isolate',
+    overflow: 'hidden',
   },
   /**
    * A hair of darkness over the preview. Not decoration: every piece of chrome on this

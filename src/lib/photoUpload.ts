@@ -32,6 +32,29 @@ export interface UploadedPhoto {
   localUri: string;
 }
 
+/** A frame straight off the camera, as `takePictureAsync` hands it over. */
+export interface CaptureSource {
+  uri: string;
+  /** The sensor's own pixel dimensions. `0` where the camera declined to say. */
+  width: number;
+  height: number;
+}
+
+/**
+ * The shape every photograph is saved in, as long-edge : short-edge.
+ *
+ * A phone sensor shoots 4:3 and the viewfinder is the whole of a ~19.5:9 screen, so neither of
+ * those is a shape to keep a photograph in — 4:3 holds more than the player framed, and 19.5:9
+ * is a screen's proportions rather than a picture's, and would look like a sliver anywhere it
+ * is shown that is not this phone.
+ *
+ * 16:9 is the picture ratio between the two, and it is close enough to the viewfinder that
+ * what gets kept is very nearly what was on the glass — the file holds about a fifth more
+ * across than the preview showed, which errs in the safe direction. Cropping the other way
+ * would cut off framing the player could see and chose.
+ */
+const TARGET_RATIO = 16 / 9;
+
 /**
  * Downscales the capture and puts it in the bucket.
  *
@@ -46,15 +69,24 @@ export interface UploadedPhoto {
  * rather than here — degrading the stored photograph to save on a request is paying for it in
  * the one place the player can see.
  */
-export async function uploadCapture(localFileUri: string, userId: string): Promise<UploadedPhoto> {
+export async function uploadCapture(source: CaptureSource, userId: string): Promise<UploadedPhoto> {
   /*
    * The contextual API, not the deprecated `manipulateAsync`.
    *
    * Transformations are queued on the context and run on a background thread when
-   * `renderAsync` is awaited, so the resize does not block JS while a multi-megapixel
-   * capture is resampled. `saveAsync` is the step that encodes and writes the file.
+   * `renderAsync` is awaited, so neither the crop nor the resize blocks JS while a
+   * multi-megapixel capture is resampled. `saveAsync` encodes and writes the file.
+   *
+   * Crop before resize, and not only because it is cheaper to resample fewer pixels: `resize`
+   * takes a width and derives the height from the *current* ratio, so resizing first would fix
+   * the height against 4:3 and the crop would then take the file under the target width.
    */
-  const rendered = await ImageManipulator.manipulate(localFileUri)
+  const context = ImageManipulator.manipulate(source.uri);
+
+  const rect = sixteenNineCrop(source.width, source.height);
+  if (rect) context.crop(rect);
+
+  const rendered = await context
     .resize({ width: CAPTURE_CONFIG.maxPhotoWidth })
     .renderAsync();
 
@@ -100,6 +132,47 @@ export async function uploadCapture(localFileUri: string, userId: string): Promi
   if (error) throw error;
 
   return { storagePath, localUri: processed.uri };
+}
+
+/**
+ * The centred 16:9 rectangle inside a frame of `width` x `height`.
+ *
+ * Orientation-agnostic on purpose. `takePictureAsync` reports the frame the way the device
+ * happens to hold it, and a portrait capture arrives portrait on most phones and landscape on
+ * some — so this reasons in long edge and short edge rather than in width and height, and puts
+ * the answer back on whichever axis it came from. 16:9 is the more elongated of the two
+ * shapes, so the long edge survives whole and the short one is what gets trimmed.
+ *
+ * Centred rather than anchored, because the viewfinder is centred on the same frame — an
+ * anchored crop would quietly shift every photograph away from what the player aimed at.
+ *
+ * Returns `null` when there is nothing to do or nothing to go on: dimensions the camera did
+ * not report, a frame already at the target, or any degenerate value. A skipped crop leaves a
+ * 4:3 photograph, which is the shape this app saved until now — the safe degradation.
+ */
+export function sixteenNineCrop(
+  width: number,
+  height: number
+): { originX: number; originY: number; width: number; height: number } | null {
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
+  if (width <= 0 || height <= 0) return null;
+
+  const long = Math.max(width, height);
+  const short = Math.min(width, height);
+
+  const targetShort = Math.round(long / TARGET_RATIO);
+
+  // Already at or narrower than 16:9 — a further crop would be inventing a shape rather than
+  // finding one. Sub-pixel differences are not worth a resample either.
+  if (targetShort >= short - 1) return null;
+
+  const trimmed = short - targetShort;
+  const offset = Math.round(trimmed / 2);
+
+  // Back onto the axis it came from: the short edge is the one being cut.
+  return width < height
+    ? { originX: offset, originY: 0, width: targetShort, height: long }
+    : { originX: 0, originY: offset, width: long, height: targetShort };
 }
 
 /**

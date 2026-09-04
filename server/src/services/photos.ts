@@ -9,8 +9,22 @@ import {
   totalOf,
 } from '../game/scoring.js';
 import { PHOTO_LIMITS, SHOWCASE_LIMIT } from '../game/album.js';
-import { serializePhoto, type PhotoRow } from '../serializers/photo.js';
-import { awardForScore, revokeForScore } from './progression.js';
+import {
+  revealCreditFor,
+  serializePhoto,
+  type PhotoRow,
+  type RevealCredit,
+} from '../serializers/photo.js';
+import {
+  serializeFeedPhoto,
+  type AuthorRow,
+  type FeedCounts,
+} from '../serializers/feedPhoto.js';
+import { emptyReactions } from '../game/community.js';
+import { PAW_REVEAL_COST, canAfford } from '../game/paws.js';
+import { spendFromWallet, walletOf } from './paws.js';
+import { awardForScore, awardXp, type Award } from './progression.js';
+import { xpForRevealingAnother } from '../game/progression.js';
 import { nicknamesFor } from './catNames.js';
 import { promoteBestPhoto } from './catDex.js';
 import { candidatesFor, type CatCandidate } from './catMatching.js';
@@ -307,7 +321,12 @@ export async function capture(input: CaptureInput) {
     };
   }
 
-  const outcome = await applyScore(row);
+  /*
+   * A capture is always its own owner's reveal — there is no other caller, and the row was
+   * inserted by this same request a few lines up. So the attribution is the capturing player
+   * and the allowance is what pays, which is the ordinary free path.
+   */
+  const outcome = await applyScore(row, input.userId);
   const award = await creditScore(input.userId, outcome);
 
   /*
@@ -372,20 +391,61 @@ async function creditScore(userId: string, outcome: ScoreOutcome) {
  * again for a better one.
  */
 export async function reveal(userId: string, photoId: string) {
-  const row = await ownedPhoto(userId, photoId);
+  const row = await revealablePhoto(userId, photoId);
+  const mine = row.owner_id === userId;
 
   if (row.scored_at) {
     throw new HttpError(409, 'That photo already has a score.');
   }
 
-  const allowance = await revealAllowance(userId);
+  const funding = await fundingFor(userId, mine);
 
-  if (allowance.remaining !== null && allowance.remaining <= 0) {
-    throw new HttpError(429, 'You have used your scores for now. Another one frees up soon.');
+  const outcome = await applyScore(row, userId, funding === 'allowance');
+
+  /*
+   * The paws are taken after the score is written, and only if one landed.
+   *
+   * Same ordering as the allowance ledger directly above, and the same reasoning: a failure
+   * between the two has to leave the player with a score they were not charged for rather
+   * than a charge for a score they never got. `scored: false` is a retry the player has not
+   * paid for, which is what the reply already promises.
+   */
+  if (outcome.scored && funding === 'paws') {
+    await spendFromWallet(userId, { cost: PAW_REVEAL_COST, reason: 'reveal', photoId: row.id });
   }
 
-  const outcome = await applyScore(row);
-  const award = await creditScore(userId, outcome);
+  /*
+   * A paid reveal pays **both** people, and the one who spent gets more.
+   *
+   *   - **The photographer** gets exactly what they would have got revealing it themselves:
+   *     the score's XP, and the best score if it beats their record. Nothing is taken from
+   *     them by somebody else pressing the button — from their side it is indistinguishable
+   *     from having revealed it, except that it was free.
+   *   - **The unlocker** gets `FOREIGN_REVEAL_XP_MULTIPLIER` times that figure, and no best
+   *     score. More than the photographer, because unlocking somebody else's is the act being
+   *     encouraged and it is the only one of the two that costs paws. No best score, because
+   *     it is the highest score a player has ever *reached* and reaching it is something you
+   *     do with a camera — letting it follow the money would set personal bests with other
+   *     people's photographs.
+   *
+   * On your own photograph there is one person and `awardForScore` does the whole thing, as it
+   * always has. That path is untouched, `personalBest` included.
+   *
+   * The reply carries the **payer's** award, because they are the one holding the phone. The
+   * photographer finds out the ordinary way: their photo has a score on it next time they look.
+   *
+   * **This is the point where paws start touching a ranked number.** Photographer Rank is
+   * computed from XP, so buying reveals advances it, and the comments elsewhere in this
+   * codebase that said paws feed nothing ranked have been corrected rather than left standing.
+   * What is still true, and is the promise that actually matters: rank unlocks **cosmetics
+   * only**, so paws buy progression and still cannot buy power. The brake on farming it is
+   * that spendable paws come only from being *given* them — the weekly grant cannot be spent —
+   * so this cannot be entered by paying. Worth watching once real players have it.
+   */
+  const award = mine
+    ? await creditScore(userId, outcome)
+    : await creditForeignReveal(userId, row.owner_id, outcome);
+
   const settled = outcome.scored ? outcome.row : row;
 
   /*
@@ -397,16 +457,212 @@ export async function reveal(userId: string, photoId: string) {
    * shape of the reply says so rather than making the app infer it from an unchanged number.
    */
   return {
-    photo: serializePhoto(settled, await nicknameOf(userId, settled)),
+    /*
+     * Two audiences, exactly as `photoDetail` has to serve.
+     *
+     * `serializePhoto` emits the true `capturedLocation`, so handing it to a caller who does
+     * not own the row would leak a position the map spends real effort coarsening — and by a
+     * far easier route than the map, since this endpoint takes an id. A non-owner gets the
+     * feed serialization, which sends zeroes.
+     */
+    photo: mine
+      ? serializePhoto(settled, await nicknameOf(userId, settled), await revealCreditOf(settled))
+      : serializeFeedPhoto(
+          settled,
+          await authorOf(settled.owner_id),
+          emptyFeedCounts(),
+          null,
+          await revealCreditOf(settled)
+        ),
     allowance: await revealAllowance(userId),
     scored: outcome.scored,
     scoreError: outcome.scored
       ? null
       : { reason: outcome.reason, message: outcome.message },
     album: await albumUsage(userId),
-    candidates: await shortlistFor(userId, settled, outcome),
+    /*
+     * No shortlist on somebody else's photograph.
+     *
+     * `shortlistFor` answers "which of *your* cats is this", and offering that on a stranger's
+     * row would invite the player to file another person's photograph into their own Dex. The
+     * owner still gets asked, the next time they open it.
+     */
+    candidates: mine ? await shortlistFor(userId, settled, outcome) : [],
     award,
   };
+}
+
+/**
+ * Crediting a reveal of somebody else's photograph. Two accounts, two different awards.
+ *
+ * The photographer's half is `awardForScore` — the ordinary call, unchanged, so their XP and
+ * best score land exactly as they would have if they had revealed it themselves. The payer's
+ * half is `awardXp` with the multiplied figure, and `awardXp` specifically: it is the entry
+ * point that does **not** move `best_score`, which is what stops a buyer acquiring a personal
+ * best set with somebody else's work.
+ *
+ * The photographer's half is best-effort and logged rather than thrown, the same way
+ * `syncLikesReceived` is in `services/votes.ts`. The score is already on the photograph and
+ * the payer has already been charged; failing the request here would report an error for
+ * something that worked, and it would report it to the wrong person — the photographer is not
+ * making this request and cannot retry it.
+ */
+async function creditForeignReveal(
+  payerId: string,
+  ownerId: string,
+  outcome: ScoreOutcome
+): Promise<Award | null> {
+  if (!outcome.scored) return null;
+
+  const total = outcome.row.score_total ?? 0;
+
+  try {
+    await awardForScore(ownerId, total);
+  } catch (err) {
+    console.error('[progression] could not credit the photographer', ownerId, err);
+  }
+
+  try {
+    return await awardXp(payerId, xpForRevealingAnother(total));
+  } catch (err) {
+    console.error('[progression] could not credit the unlocker', payerId, err);
+    return null;
+  }
+}
+
+/**
+ * The photograph a reveal is being bought for, or a refusal.
+ *
+ * Two readers, and this is the function that opened the second door. It used to be
+ * `ownedPhoto` and nothing else, which is why "reveal somebody else's score" did not exist:
+ * a stranger's id answered 404 before any of the rest of this ran.
+ *
+ * A photo that is not yours has to be **shared to the feed** — the same bar `votablePhoto`
+ * and `giftablePhoto` set, and for the same reason. An unshared photo is not visible, so it
+ * is not something to spend on, and answering 404 rather than 403 avoids confirming that a
+ * guessed id names somebody's private work.
+ */
+async function revealablePhoto(userId: string, photoId: string): Promise<PhotoRow> {
+  const { data, error } = await supabase
+    .from('photos')
+    .select('*')
+    .eq('id', photoId)
+    .maybeSingle<PhotoRow>();
+
+  if (error) throw error;
+  if (!data) throw new HttpError(404, 'We could not find that photo.');
+
+  if (data.owner_id !== userId && !data.shared_to_feed) {
+    throw new HttpError(404, 'We could not find that photo.');
+  }
+
+  return data;
+}
+
+/**
+ * Which pocket this reveal comes out of, or a refusal.
+ *
+ * The free allowance is for **your own album**, and that is the whole of the rule. It is what
+ * was sold — "two scores a day" has always meant two of your own photographs — and it is also
+ * the fix for a bug this codebase has already had once: the detail screen used to offer
+ * "Reveal the score" on other people's photos, which would have spent your allowance on their
+ * row. Making somebody else's reveal *always* cost paws means that can never come back by
+ * accident, because the allowance is not consulted on that branch at all.
+ *
+ * So:
+ *   your photo, allowance left  → free
+ *   your photo, allowance gone  → paws
+ *   somebody else's             → paws, always
+ *
+ * Refusing here rather than after the model call is trap 10: a spend guard that runs after the
+ * thing it guards has already been paid for is not a guard.
+ */
+async function fundingFor(userId: string, mine: boolean): Promise<'allowance' | 'paws'> {
+  if (mine) {
+    const allowance = await revealAllowance(userId);
+    if (allowance.remaining === null || allowance.remaining > 0) return 'allowance';
+  }
+
+  if (!canAfford(await walletOf(userId), PAW_REVEAL_COST)) {
+    /*
+     * 409 with a code, not the 429 the allowance used to answer.
+     *
+     * 429 said "come back later", which was true when time was the only thing that could fix
+     * it. It is not any more: the player can be given paws, or buy them, and the client tells
+     * these apart by the code to route to the shop rather than to a countdown.
+     */
+    throw new HttpError(
+      409,
+      mine
+        ? 'You have used your free scores. Reveal this one with paws, or wait for a slot.'
+        : 'You do not have enough paws to reveal that.',
+      'no_paws'
+    );
+  }
+
+  return 'paws';
+}
+
+/**
+ * The credit line for one photograph, with the username looked up.
+ *
+ * The single-row counterpart to the grouped lookup in `assembleFeedCards`. It costs a query
+ * only when there is actually a credit to draw — `revealCreditFor` is consulted first, and it
+ * answers null for the ordinary case of a photographer revealing their own work, which is
+ * nearly every row.
+ */
+async function revealCreditOf(row: PhotoRow): Promise<RevealCredit | null> {
+  if (!revealCreditFor(row, null)) return null;
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('username')
+    .eq('id', row.revealed_by as string)
+    .maybeSingle<{ username: string | null }>();
+
+  if (error) throw error;
+
+  return revealCreditFor(row, data?.username ?? null);
+}
+
+/** The author row a feed serialization needs. Absent is survivable — the serializer defaults. */
+async function authorOf(ownerId: string): Promise<AuthorRow | null> {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, username, avatar_url, player_stats ( rank )')
+    .eq('id', ownerId)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return null;
+
+  const row = data as unknown as {
+    id: string;
+    username: string | null;
+    avatar_url: string | null;
+    player_stats: { rank: number }[] | { rank: number } | null;
+  };
+
+  const stats = Array.isArray(row.player_stats) ? row.player_stats[0] : row.player_stats;
+
+  return {
+    id: row.id,
+    username: row.username,
+    avatar_url: row.avatar_url,
+    rank: stats?.rank ?? 1,
+  };
+}
+
+/**
+ * Zeroed tallies for a photograph nobody has reacted to yet.
+ *
+ * A photo being revealed for the first time may well have reactions already — sharing is not
+ * gated on a score — but this reply is about the *score*, and the screen that receives it
+ * reads its reaction counts from the copy it is already holding. Counting them here would be
+ * two more queries for numbers the caller has.
+ */
+function emptyFeedCounts(): FeedCounts {
+  return { reactions: emptyReactions(), myReaction: null };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -484,7 +740,16 @@ export async function detail(userId: string, photoId: string) {
   }
 
   if (data.owner_id === userId) {
-    return { photo: serializePhoto(data, await nicknameOf(userId, data)) };
+    /*
+     * The owner sees the credit too, and this is the screen it matters most on.
+     *
+     * Somebody paid to have your photograph judged — you are the person that was done for, so
+     * "Unlocked by @name" belongs here more than it belongs on a stranger's feed card.
+     * `revealCreditFor` still returns null when you revealed it yourself.
+     */
+    return {
+      photo: serializePhoto(data, await nicknameOf(userId, data), await revealCreditOf(data)),
+    };
   }
 
   const [card] = await assembleFeedCards([data], userId);
@@ -653,17 +918,40 @@ export async function remove(userId: string, photoId: string) {
   await deletePhotoObject(row.storage_path);
 
   /*
-   * The XP this photograph earned goes with it.
+   * The XP this photograph earned **stays**, and so does everything else it moved.
    *
-   * Only for a photo that was actually scored — an unscored row never credited anything, and
-   * `score_total` is null on it. Done after the delete rather than before, so a failed delete
-   * cannot cost a player XP for a photograph they still have.
+   * This used to revoke it. `revokeForScore` was added on 2026-08-24 to fix a real complaint —
+   * the profile kept reading "Newcomer · 59" after the photograph that scored the 59 was
+   * deleted — and it was the wrong fix for it. Removed 2026-08-31.
    *
-   * Rank and `best_score` are deliberately left alone. See `revokeForScore`.
+   * ## Why nothing is taken back
+   *
+   * **The score was paid for and the payment is not refunded.** That is not a new principle;
+   * it is the one `2026-08-10_reveal_ledger.sql` was written to establish. The `reveals` table
+   * exists precisely so that deleting a scored photograph does *not* hand its reveal back,
+   * because otherwise the free tier's two-a-day is unlimited for anyone willing to delete. The
+   * same is now true of paws: a paw-funded reveal writes a ledger row that a deletion does not
+   * reverse.
+   *
+   * So the cost survives the photograph. Taking the reward back while keeping the charge is the
+   * player paying twice for one look — and it made deleting a bad photo quietly expensive,
+   * which is a tax on tidying up an album the product is otherwise asking people to curate.
+   *
+   * This also makes progression **monotonic for the first time**: `xp`, `rank` and `best_score`
+   * now all only ever rise. The odd state `revokeForScore` documented — a player sitting at
+   * rank 3 on rank-2 XP, because rank never fell but XP did — is no longer reachable.
+   *
+   * ## What stops it being farmable
+   *
+   * Capture, reveal, delete, repeat is the obvious worry, and the thing rationing it is the
+   * thing that always was: **the reveal allowance**, counted from the `reveals` ledger rather
+   * than from surviving photographs — for exactly this reason. Deleting frees album space, not
+   * scores. XP is bounded by spend, and it always was.
+   *
+   * Nothing about a paid reveal changes this. Both accounts keep what they earned, including
+   * the unlocker's bonus, and the owner deleting the photograph does not reach into a stranger's
+   * progression.
    */
-  if (row.score_total !== null) {
-    await revokeForScore(userId, row.score_total);
-  }
 
   for (const entry of entries ?? []) {
     // The photograph that was this cat's tile no longer exists, so the pin the player set by
@@ -713,7 +1001,27 @@ type ScoreOutcome =
  * Now the caller gets both facts and can say both: the photo is saved, and here is what
  * happened to its score.
  */
-async function applyScore(row: PhotoRow): Promise<ScoreOutcome> {
+async function applyScore(
+  row: PhotoRow,
+  /**
+   * Who is paying, and therefore whose name goes on the reveal.
+   *
+   * Stamped onto the row rather than worked out later, because the one moment it is really
+   * needed — deleting the photograph, to revoke the XP from the account that actually got it
+   * — is the moment every other record of it has already been cleared. See the 2026-08-31
+   * migration for the longer version.
+   */
+  revealedBy: string,
+  /**
+   * Whether this reveal is being paid for out of the free allowance.
+   *
+   * False when paws are funding it, and the consequence is one skipped INSERT into `reveals`
+   * further down. That table is the *allowance* ledger and nothing else — a paw-funded row in
+   * it would silently consume a free reveal the player had already paid to avoid, which is the
+   * same class of bug as the one that used to spend your allowance on somebody else's photo.
+   */
+  chargeAllowance = true
+): Promise<ScoreOutcome> {
   /*
    * ────────────────────────────────────────────────────────────────────────
    *  Everything from here to the `scorePhoto` call below is a spend guard.
@@ -853,6 +1161,15 @@ async function applyScore(row: PhotoRow): Promise<ScoreOutcome> {
       badges: result.badges,
       traits: result.traits,
       scored_at: new Date().toISOString(),
+      /*
+       * Written in the same statement as the score, not a follow-up update.
+       *
+       * A photograph that has a `scored_at` and no `revealed_by` is a row nothing can
+       * attribute — the credit line would read "someone" and, worse, deleting it would have
+       * nobody to take the XP back from. Making it one write means that state is not
+       * reachable through a failure, only through being older than the column.
+       */
+      revealed_by: revealedBy,
       scoring_model: model,
       scoring_version: version,
       scoring_raw: result,
@@ -889,16 +1206,18 @@ async function applyScore(row: PhotoRow): Promise<ScoreOutcome> {
    * the player keeps a score they were not charged for; that is a free reveal on a bad day
    * rather than a lost one, and it is logged.
    */
-  const { error: ledgerError } = await supabase.from('reveals').insert({
-    user_id: updated.owner_id,
-    photo_id: updated.id,
-    // The row's own timestamp, not a second `now()` — the photo and its ledger entry are
-    // one event and should not disagree about when it happened.
-    scored_at: updated.scored_at,
-  });
+  if (chargeAllowance) {
+    const { error: ledgerError } = await supabase.from('reveals').insert({
+      user_id: updated.owner_id,
+      photo_id: updated.id,
+      // The row's own timestamp, not a second `now()` — the photo and its ledger entry are
+      // one event and should not disagree about when it happened.
+      scored_at: updated.scored_at,
+    });
 
-  if (ledgerError) {
-    console.error('[reveals] score written but not charged', updated.id, ledgerError.message);
+    if (ledgerError) {
+      console.error('[reveals] score written but not charged', updated.id, ledgerError.message);
+    }
   }
 
   return { scored: true, row: updated };

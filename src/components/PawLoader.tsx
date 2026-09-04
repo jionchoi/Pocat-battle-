@@ -166,5 +166,25 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
+    /*
+     * Centred in its own right, not only wherever it happens to be dropped.
+     *
+     * Every caller so far has centred it from outside — a button whose body is
+     * `justifyContent: 'center'`, a sheet that stretches it. The moment one does not, a trail
+     * that is meant to sit in the middle of a control is pinned to its left edge instead, and
+     * that is not something the loader should be leaving to the site that mounts it.
+     */
+    justifyContent: 'center',
+    /*
+     * Half the lift back.
+     *
+     * Each print animates from `-STEP_RISE` to `0`, so at any instant a stagger of three has
+     * some prints raised and some placed, and the group's optical centre sits `STEP_RISE / 2`
+     * above the line the layout put it on — transforms do not move a box, only what is drawn
+     * in it. Pushing the box down by that half puts the walk's midpoint back on the centre
+     * line, so the trail reads as centred through the whole cycle rather than only at the
+     * instant every paw happens to be down.
+     */
+    marginTop: STEP_RISE / 2,
   },
 });

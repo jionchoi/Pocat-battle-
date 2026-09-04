@@ -124,7 +124,12 @@ export function filterById(id: string): CaptureFilter {
 }
 
 /**
- * The stand-in "scene" each swatch in the rail is drawn over.
+ * The stand-in "scene" a *graded* swatch in the rail is drawn over.
+ *
+ * Natural does not use it: with no layer there is nothing to grade, so the swatch that would
+ * result is the bare gradient — which reads as a look of its own rather than as the absence of
+ * one. `FilterFace` draws the layerless filter as a flat white disc instead, which is also what
+ * puts the plain white ring back on the shutter when nothing is applied.
  *
  * A filter preview has to show the filter doing something, and the one thing it cannot show
  * is the actual camera feed — sampling live frames to render three thumbnails would mean

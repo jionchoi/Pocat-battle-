@@ -7,7 +7,6 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { StatusBar } from 'expo-status-bar';
 import { Image } from 'expo-image';
 import * as MediaLibrary from 'expo-media-library';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -28,6 +27,7 @@ import {
   type IconProps,
 } from 'phosphor-react-native';
 
+import { useStatusBarStyle } from '../../components/Screen';
 import { Button } from '../../components/Button';
 import { CircleButton } from '../../components/CircleButton';
 import { ScoreBreakdown } from '../../components/ScoreBreakdown';
@@ -169,7 +169,9 @@ export function ScoreResultScreen() {
    */
   const [failureDismissed, setFailureDismissed] = useState(false);
   /** Which of the small actions is mid-flight, so only that one shows a wait. */
-  const [busy, setBusy] = useState<'dex' | 'phone' | 'map' | 'album' | 'score' | null>(
+  const [busy, setBusy] = useState<
+    'dex' | 'phone' | 'map' | 'album' | 'score' | 'retake' | null
+  >(
     null
   );
   const [confirmingRetake, setConfirmingRetake] = useState(false);
@@ -319,14 +321,26 @@ export function ScoreResultScreen() {
     if (!result || pinned) return;
 
     /*
-     * Nothing to pin to yet.
+     * Nothing to pin to yet — so ask the question instead of reporting it.
      *
-     * A Dex card belongs to a cat, and a freshly captured photo has no cat until the
-     * player confirms which one it is — `photo.catId` is empty until then. Rather than
-     * pin to nothing, this says so; the control comes back with identification.
+     * A Dex card belongs to a cat, and a freshly captured photo has no cat until the player
+     * confirms which one it is: `photo.catId` is empty until then. This used to raise a toast
+     * saying "identify the cat first" and stop, which named the prerequisite and then offered
+     * no way to satisfy it — the identify sheet is shown once, on arrival, and a player who
+     * dismissed it had no route back to it. The button looked broken because from where they
+     * were standing it was.
+     *
+     * Reopening the sheet is that route. `identifyResolved` is what closed it, so clearing it
+     * is what brings it back; `identifyOpen` still checks that the server offered candidates
+     * at all, so this cannot conjure a sheet with nothing in it.
      */
     if (!result.photo.catId) {
-      showToast('Identify the cat first, then you can pin this photo to its card.', 'neutral');
+      if (result.candidates !== undefined) {
+        setIdentifyResolved(false);
+        return;
+      }
+
+      showToast('This photo has no cat on it to pin yet.', 'neutral');
       return;
     }
 
@@ -542,16 +556,27 @@ export function ScoreResultScreen() {
    * the result for a photo that no longer exists.
    */
   const retake = useCallback(async () => {
-    setConfirmingRetake(false);
+    /*
+     * The sheet stays up while the delete runs, showing the paw trail on its own button.
+     *
+     * It used to close on the first frame and then sit on the reveal for as long as the
+     * round trip took, with nothing anywhere saying the tap had registered — and this path
+     * deletes a photograph, so silence is the one thing it must not do.
+     */
+    setBusy('retake');
 
     if (result) {
       try {
         await removePhoto(result.photo.id);
       } catch {
         showToast('That shot could not be deleted — it is still in your album.', 'error');
+        setBusy(null);
+        setConfirmingRetake(false);
+        return;
       }
     }
 
+    setConfirmingRetake(false);
     resetCapture();
     navigation.replace('Capture');
   }, [navigation, removePhoto, resetCapture, result]);
@@ -563,10 +588,15 @@ export function ScoreResultScreen() {
    * deliberately ephemeral, so there is nothing to show and the honest move is to say so
    * rather than render a card full of zeroes.
    */
+  /*
+   * Both branches of this screen are the arena — a photograph under a black wash — so the
+   * clock inverts for either. Applied on focus, not on mount: see the note in `Screen`.
+   */
+  useStatusBarStyle('light');
+
   if (!result) {
     return (
       <View style={[styles.root, styles.empty]}>
-        <StatusBar style="light" />
         <Text style={[text.h2, { color: arena.text }]}>That result has expired</Text>
         <Text style={[text.body, styles.emptyBody]}>
           The photo is safe in your album. Open it there to see the full breakdown.
@@ -618,8 +648,6 @@ export function ScoreResultScreen() {
 
   return (
     <View style={styles.root}>
-      <StatusBar style="light" />
-
       {/*
         The shot itself, full bleed and dimmed to a backdrop.
 
@@ -911,8 +939,30 @@ export function ScoreResultScreen() {
         visible={confirmingRetake}
         onCancel={() => setConfirmingRetake(false)}
         onConfirm={() => void retake()}
+        busy={busy === 'retake'}
         title="Retake this photo?"
-        body={`The photo and its score of ${photo.scores.total} are deleted, and the camera opens again. The XP it earned you stays.`}
+        /*
+         * What a retake actually costs, and this sentence has now been wrong in both
+         * directions.
+         *
+         * It originally said the XP stays. Then deletion started revoking it and this was
+         * rewritten to say it goes back. As of 2026-08-31 deletion revokes nothing again — the
+         * score was paid for and the payment is not refunded, so keeping the reward is the only
+         * version where the player is not charged twice — and the original sentence is true
+         * once more.
+         *
+         * Which is the lesson worth leaving here: this copy is a claim about server behaviour,
+         * and it has to be re-read whenever the delete path changes. It is not decoration.
+         *
+         * The score is only quoted when there is one. An unscored capture carries zeroes, so an
+         * unguarded sentence promises to delete "its score of 0" — a real-looking verdict of
+         * nought on a photograph nothing had judged.
+         */
+        body={
+          photo.scoredAt
+            ? `The photo and its score of ${photo.scores.total} are deleted, and the camera opens again. The ${photo.scores.total} XP it earned is yours to keep — the score was already spent.`
+            : 'The photo is deleted and the camera opens again. It was never scored, so nothing is lost.'
+        }
         confirmLabel="Delete and retake"
         cancelLabel="Keep this one"
         destructive

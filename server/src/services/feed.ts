@@ -12,6 +12,7 @@ import {
   type ViralWindow,
 } from '../game/community.js';
 import { serializeFeedPhoto, type AuthorRow } from '../serializers/feedPhoto.js';
+import { revealCreditFor } from '../serializers/photo.js';
 import { friendIdsOf } from './friends.js';
 import type { PhotoRow } from '../serializers/photo.js';
 import { nicknamesFor } from './catNames.js';
@@ -49,10 +50,27 @@ export async function assembleFeedCards(rows: PhotoRow[], viewerId: string | nul
   const photoIds = rows.map((row) => row.id);
   const ownerIds = [...new Set(rows.map((row) => row.owner_id))];
 
-  const [authors, tallies, names] = await Promise.all([
+  /*
+   * Who unlocked each score, for the photographs somebody else paid to reveal.
+   *
+   * A fourth grouped lookup, and it usually fetches nothing: `revealerIds` is empty on any
+   * page where every score was revealed by its own photographer, which is the ordinary case
+   * and the case a young feed is entirely made of. The query is skipped outright when it is,
+   * so this costs a page nothing until paid reveals actually exist in it.
+   */
+  const revealerIds = [
+    ...new Set(
+      rows
+        .filter((row) => row.revealed_by && row.revealed_by !== row.owner_id)
+        .map((row) => row.revealed_by as string)
+    ),
+  ];
+
+  const [authors, tallies, names, revealers] = await Promise.all([
     authorsFor(ownerIds),
     talliesFor(photoIds, viewerId),
     viewerId ? nicknamesFor(viewerId, rows.map((r) => r.cat_id).filter((id): id is string => id !== null)) : null,
+    usernamesFor(revealerIds),
   ]);
 
   return rows.map((row) =>
@@ -67,9 +85,38 @@ export async function assembleFeedCards(rows: PhotoRow[], viewerId: string | nul
        * label for an animal, and showing a stranger's to everyone would publish it. The owner
        * reading their own photo in the feed sees theirs, because they have a Dex entry for it.
        */
-      row.cat_id ? (names?.get(row.cat_id) ?? null) : null
+      row.cat_id ? (names?.get(row.cat_id) ?? null) : null,
+      /*
+       * `revealCreditFor` is what decides there is anything to say — it returns null for a
+       * photograph its own owner revealed, which is why this can be handed the lookup
+       * unconditionally without the feed sprouting "Unlocked by" on every card.
+       */
+      revealCreditFor(row, row.revealed_by ? (revealers.get(row.revealed_by) ?? null) : null)
     )
   );
+}
+
+/**
+ * Usernames by id, for the reveal credit line.
+ *
+ * Deliberately not `authorsFor`. That one carries an avatar and a rank because a feed card
+ * draws a face beside a name; a credit line is one word of text, and fetching a rank to render
+ * it would be three columns nobody reads. They are also different sets — the revealer of a
+ * photograph is by definition not its author, or there would be no credit to show.
+ */
+async function usernamesFor(ids: readonly string[]): Promise<Map<string, string>> {
+  if (ids.length === 0) return new Map();
+
+  const { data, error } = await supabase.from('profiles').select('id, username').in('id', ids);
+
+  if (error) throw error;
+
+  const map = new Map<string, string>();
+  for (const row of data ?? []) {
+    if (row.username) map.set(row.id as string, row.username as string);
+  }
+
+  return map;
 }
 
 async function authorsFor(ownerIds: readonly string[]): Promise<Map<string, AuthorRow>> {

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useContext, useEffect } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -10,8 +10,12 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { StatusBar } from 'expo-status-bar';
-import { useNavigation, useNavigationState } from '@react-navigation/native';
+import { setStatusBarStyle } from 'expo-status-bar';
+import {
+  NavigationContext,
+  useNavigation,
+  useNavigationState,
+} from '@react-navigation/native';
 
 import { CaretLeft, type IconProps } from 'phosphor-react-native';
 
@@ -28,6 +32,46 @@ import {
 } from '../theme';
 import { Grain } from './Grain';
 import { PawRefreshIndicator } from './PawRefresh';
+
+/**
+ * Keeps the iOS status bar — the clock, the battery, the signal — legible against whatever
+ * surface is currently on screen: dark glyphs on the light context, light glyphs on the dark.
+ *
+ * ## Why this is not `<StatusBar style={...} />`
+ *
+ * `expo-status-bar`'s component applies its style in an effect on mount and on prop change,
+ * and does nothing on unmount. That is fine for one screen and wrong for a navigator: a tab
+ * or a pushed screen that has already mounted does not re-run its effect when it comes back
+ * into view, so the last screen to *mount* keeps ownership of the bar. Open the camera
+ * (light glyphs, correct on black), come back to the album, and the clock stays white on
+ * white — invisible, which is exactly the bug this replaces.
+ *
+ * Focus is the right trigger because focus is the question being asked: whichever screen the
+ * player is looking at owns the bar. `NavigationContext` is read rather than `useFocusEffect`
+ * so the hook is also safe in a surface mounted outside a navigator, where there is no focus
+ * to wait for and applying immediately is correct.
+ */
+export function useStatusBarStyle(style: 'light' | 'dark'): void {
+  const navigation = useContext(NavigationContext);
+
+  useEffect(() => {
+    const apply = () => setStatusBarStyle(style, false);
+
+    if (!navigation) {
+      apply();
+      return;
+    }
+
+    if (navigation.isFocused()) apply();
+
+    return navigation.addListener('focus', apply);
+  }, [navigation, style]);
+}
+
+/** The bar style a context wants: dark glyphs on paper, light glyphs on the arena. */
+export function statusBarStyleFor(context: ContextName): 'light' | 'dark' {
+  return context === 'arena' ? 'light' : 'dark';
+}
 
 /**
  * Screen shell.
@@ -114,6 +158,8 @@ export function Screen({
   const insets = useSafeAreaInsets();
   const showGrain = grain ?? context === 'arena';
 
+  useStatusBarStyle(statusBarStyleFor(context));
+
   const padding = bleed
     ? undefined
     : {
@@ -132,7 +178,6 @@ export function Screen({
   if (scroll) {
     return (
       <View style={[styles.root, { backgroundColor: c.bg }, style]}>
-        <StatusBar style={context === 'arena' ? 'light' : 'dark'} />
         {showGrain ? <Grain context={context} /> : null}
         {indicator}
         <ScrollView
@@ -149,7 +194,6 @@ export function Screen({
 
   return (
     <View style={[styles.root, { backgroundColor: c.bg }, style]}>
-      <StatusBar style={context === 'arena' ? 'light' : 'dark'} />
       {showGrain ? <Grain context={context} /> : null}
       {indicator}
       <View style={[styles.root, padding]}>{children}</View>

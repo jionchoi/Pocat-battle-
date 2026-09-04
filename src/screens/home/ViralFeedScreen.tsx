@@ -11,9 +11,15 @@ import { FeedPost } from '../../components/FeedPost';
 import { pawRefreshControl } from '../../components/PawRefresh';
 import { Screen, SectionHeader, Wordmark } from '../../components/Screen';
 import { PhotoCardSkeleton } from '../../components/Skeleton';
-import { TrendingCard } from '../../components/ViralCard';
+import { TrendingCard, TrendingSlot } from '../../components/ViralCard';
 import { usePhotoImpressions } from '../../hooks/usePhotoImpressions';
+import { usePawGift } from '../../hooks/usePawGift';
 import { usePhotoReaction } from '../../hooks/usePhotoReaction';
+import {
+  PLACEHOLDER_POSTS,
+  PLACEHOLDER_TRENDING,
+  SHOW_PLACEHOLDERS,
+} from '../../constants/placeholders';
 import type { PhotoWithAuthor } from '../../models';
 import type { HomeStackParamList } from '../../navigation/types';
 import { useAuthStore } from '../../store/authStore';
@@ -120,26 +126,67 @@ export function ViralFeedScreen({ navigation }: Props) {
 
   /* ------------------------------- loading ------------------------------- */
 
-  const load = useCallback(async (isRefresh = false) => {
-    if (isRefresh) setRefreshing(true);
-    else setLoading(true);
-    setError(null);
-
-    try {
-      const page = await feedApi.viral({ window: DEFAULT_WINDOW });
-      setTrending(page.trending);
-      setRising(page.rising);
-      // The server may widen the window when a day is too thin to rank. Tracked because
-      // paging has to keep asking for the same slice it was actually given.
-      setServed(page.window);
-      setOffset(page.nextOffset);
-    } catch {
-      setError('We could not load the feed.');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
+  /**
+   * Fills the screen with the stand-in feed — five ranked photographs for the bento and six
+   * posts under them, with real pictures on them. See `constants/placeholders`.
+   *
+   * Loaded into the same state the real page goes into rather than swapped in at render.
+   * That is what makes a placeholder card *behave*: `patchPhoto` finds it, so tapping a
+   * heart moves the count the way it will on a real one. Substituting at render left the
+   * arrays frozen in a module constant, and the reaction lit up while its number sat still —
+   * which previews the design and lies about the interaction.
+   *
+   * `offset` is cleared so paging cannot ask for page two of something that does not exist.
+   */
+  const showPlaceholders = useCallback(() => {
+    setTrending(PLACEHOLDER_TRENDING);
+    setRising(PLACEHOLDER_POSTS);
+    setOffset(null);
   }, []);
+
+  const load = useCallback(
+    async (isRefresh = false) => {
+      if (isRefresh) setRefreshing(true);
+      else setLoading(true);
+      setError(null);
+
+      try {
+        const page = await feedApi.viral({ window: DEFAULT_WINDOW });
+
+        // The server may widen the window when a day is too thin to rank. Tracked because
+        // paging has to keep asking for the same slice it was actually given.
+        setServed(page.window);
+
+        /*
+         * All or nothing. Mixing a real photograph in with the stand-ins would put somebody's
+         * genuine ranking beside invented ones with no way to tell which was which — so the
+         * substitution only happens when the ranking produced nothing at all.
+         */
+        if (SHOW_PLACEHOLDERS && page.trending.length === 0 && page.rising.length === 0) {
+          showPlaceholders();
+          return;
+        }
+
+        setTrending(page.trending);
+        setRising(page.rising);
+        setOffset(page.nextOffset);
+      } catch {
+        /*
+         * The banner still says what happened. The stand-ins go up behind it because an
+         * unreachable API is the normal state while this is being designed, and an error
+         * over an empty page shows nothing at all — which is the one thing a design pass
+         * cannot work with. The message is the truth; the photographs are labelled fake by
+         * the flag that put them there.
+         */
+        setError('We could not load the feed.');
+        if (SHOW_PLACEHOLDERS) showPlaceholders();
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [showPlaceholders]
+  );
 
   useEffect(() => {
     void load();
@@ -188,6 +235,10 @@ export function ViralFeedScreen({ navigation }: Props) {
 
   const react = usePhotoReaction(patchPhoto);
 
+  // The same patcher, for the same reason: a photo can sit in the bento and the post list at
+  // once, and a paw given to one copy has to show on the other.
+  const givePaw = usePawGift(patchPhoto);
+
   /* -------------------------------- rows --------------------------------- */
 
   const rows = useMemo<FeedRow[]>(() => {
@@ -196,6 +247,7 @@ export function ViralFeedScreen({ navigation }: Props) {
     let taken = 0;
     BENTO_ROWS.forEach((count, row) => {
       const photos = trending.slice(taken, taken + count);
+
       if (photos.length > 0) {
         out.push({ kind: 'bento', key: `bento-${row}`, photos, rankFrom: taken + 1, row });
       }
@@ -256,12 +308,21 @@ export function ViralFeedScreen({ navigation }: Props) {
               />
             ))}
             {/*
-              Pads a short final row so two cards in a three-across row stay card-sized
-              instead of stretching to fill the gap. `flex: 1` on a spacer is the only way
-              to hold a column open in a flex row.
+              Holds the columns the ranking has not filled.
+
+              These were bare spacers, there only so that two cards in a three-across row
+              stayed card-sized instead of stretching across the gap — `flex: 1` on a spacer
+              is the only way to hold a column open in a flex row. They now draw the slot as
+              well as hold it, which is what makes the block legible before the feed is busy.
+              With placeholders off, `TrendingSlot` renders the same bare spacer as before.
             */}
             {Array.from({ length: BENTO_ROWS[item.row] - item.photos.length }).map((_, i) => (
-              <View key={`pad-${i}`} style={styles.bentoCard} />
+              <TrendingSlot
+                key={`slot-${i}`}
+                rank={item.rankFrom + item.photos.length + i}
+                aspect={BENTO_ASPECT[item.row] ?? 3 / 4}
+                style={styles.bentoCard}
+              />
             ))}
           </View>
         );
@@ -288,12 +349,17 @@ export function ViralFeedScreen({ navigation }: Props) {
           onPress={() => openPhoto(item.photo)}
           onPressAuthor={() => openAuthor(item.photo)}
           onReact={(reaction) => react(item.photo, reaction)}
+          onGivePaw={() => givePaw(item.photo)}
         />
       );
     },
-    [myReactions, openAuthor, openPhoto, react, viewerId]
+    [givePaw, myReactions, openAuthor, openPhoto, react, viewerId]
   );
 
+  /*
+   * Only reachable with placeholders off. With them on, `load` puts the stand-in feed into
+   * this same state, so there is never nothing to draw.
+   */
   const isEmpty = !loading && trending.length === 0 && rising.length === 0;
 
   /**

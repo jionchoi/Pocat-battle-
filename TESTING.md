@@ -13,8 +13,11 @@ What follows is what can actually be run today, and what still cannot.
 
 ## 1. The checks that need nothing
 
-Nine scripts, no database, no API key, no network. Each exits non-zero on failure, so they work
-in a pipeline as well as by eye.
+Twelve scripts, no database, no API key, no network. Each exits non-zero on failure, so they
+work in a pipeline as well as by eye.
+
+This file said "nine" and listed nine for a fortnight after there were eleven. The count is the
+part that goes stale, so if you add a script, change the number in the same commit.
 
 ```bash
 cd server
@@ -26,8 +29,11 @@ npx tsx scripts/check-challenges.ts    # status from a window, winners, the capt
 npx tsx scripts/check-progression.ts   # the rank ramp
 npx tsx scripts/check-map.ts           # bbox parsing and the coarsening grid
 npx tsx scripts/check-catdex.ts        # the Dex patch schema
-npx tsx scripts/check-shop.ts          # the catalogue's shape and what a player owns
+npx tsx scripts/check-shop.ts          # the catalogue, what a player owns, and paw unlocks
 npx tsx scripts/check-search.ts        # ilike escaping, against a local model of the operator
+npx tsx scripts/check-limits.ts        # the shape of the rate-limit policy, not its numbers
+npx tsx scripts/check-injection.ts     # the anti-injection clause and the message roles
+npx tsx scripts/check-paws.ts          # the grant period, the bucket choice, the wallet sum
 ```
 
 All of them at once:
@@ -51,13 +57,19 @@ Everything that touches Postgres. The split is the one described in `BACKEND.md`
 no database under them live in `server/src/game/` precisely so they can be exercised like this,
 and the services around them are checked by running the thing.
 
-### Three of them guard against drift, not bugs
+### Four of them guard against drift, not bugs
 
-`check-progression`, `check-map` and `check-community` each **parse the client's
+`check-progression`, `check-map`, `check-community` and `check-paws` each **parse the client's
 `src/constants/game.ts` as text** and assert its constants match the server's. The rank ramp,
-the map TTL and the three community numbers are mirrored on both sides — the client needs them
-to render offline — and two copies of a constant is a thing that only stays correct if
-something checks. If one of these fails, the two halves of the app have started disagreeing.
+the map TTL, the three community numbers and the paw grant are mirrored on both sides — the
+client needs them to render offline — and two copies of a constant is a thing that only stays
+correct if something checks. If one of these fails, the two halves of the app have started
+disagreeing.
+
+`check-paws` is the one where drift costs the most. The others mirror numbers that draw a
+label; that one mirrors the size of the weekly paw grant, which the gift toast quotes back to
+the player as "6 left this week". A client granting itself a different number would be the app
+lying about somebody's money, and they would find out by running out a paw early.
 
 ---
 

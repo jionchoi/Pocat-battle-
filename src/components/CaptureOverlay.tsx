@@ -308,14 +308,21 @@ const ShutterRail = React.memo(function ShutterRail({
 /**
  * One look, drawn as a circle.
  *
- * The face is the filter applied to a fixed gradient — see `SWATCH_SCENE` — using the same
- * `color`/`blendMode`/`opacity` the viewfinder uses. That is the point of building it this way
- * rather than picking a colour per filter by hand: the preview is generated *by* the filter,
+ * A *graded* look shows the filter applied to a fixed gradient — see `SWATCH_SCENE` — using the
+ * same `color`/`blendMode`/`opacity` the viewfinder uses. That is the point of building it this
+ * way rather than picking a colour per filter by hand: the preview is generated *by* the filter,
  * so it cannot drift from what the filter actually does.
  *
- * `isolation: 'isolate'` is required, not cosmetic. Without it the blend layer composites
- * against the live camera behind the row instead of against this circle's own gradient, and
- * every swatch turns into a little window onto the viewfinder.
+ * **Natural is plain white, and is not drawn from the scene at all.** It has no layer, so
+ * grading the gradient with it produced the bare gradient — a swatch that looked like *a* look
+ * rather than like the absence of one, and a shutter that opened wearing a tan-and-brown face
+ * instead of the white ring every camera on the planet has. White says "nothing applied" the
+ * way no rendering of a scene can, and it puts the default state of this screen back on the
+ * conventional shutter.
+ *
+ * `isolation: 'isolate'` is required on the graded path, not cosmetic. Without it the blend
+ * layer composites against the live camera behind the row instead of against this circle's own
+ * gradient, and every swatch turns into a little window onto the viewfinder.
  */
 const FilterFace = React.memo(function FilterFace({
   filter,
@@ -326,29 +333,32 @@ const FilterFace = React.memo(function FilterFace({
   size: number;
   style?: StyleProp<ViewStyle>;
 }) {
+  const shape = { width: size, height: size, borderRadius: size / 2 };
+
+  // See above: no layer means no scene either. A flat white disc, and nothing composited.
+  if (!filter.layer) {
+    return <View style={[styles.face, styles.faceNatural, shape, style]} />;
+  }
+
   return (
-    <View
-      style={[styles.face, { width: size, height: size, borderRadius: size / 2 }, style]}
-    >
+    <View style={[styles.face, shape, style]}>
       <LinearGradient
         colors={[...SWATCH_SCENE]}
         start={{ x: 0.15, y: 0 }}
         end={{ x: 0.85, y: 1 }}
         style={StyleSheet.absoluteFill}
       />
-      {filter.layer ? (
-        <View
-          pointerEvents="none"
-          style={[
-            StyleSheet.absoluteFill,
-            {
-              backgroundColor: filter.layer.color,
-              mixBlendMode: filter.layer.blendMode,
-              opacity: filter.layer.opacity,
-            },
-          ]}
-        />
-      ) : null}
+      <View
+        pointerEvents="none"
+        style={[
+          StyleSheet.absoluteFill,
+          {
+            backgroundColor: filter.layer.color,
+            mixBlendMode: filter.layer.blendMode,
+            opacity: filter.layer.opacity,
+          },
+        ]}
+      />
     </View>
   );
 });
@@ -478,6 +488,17 @@ const styles = StyleSheet.create({
     borderColor: arena.hairlineHi,
     /* Contains the blend. See the note on FilterFace. */
     isolation: 'isolate',
+  },
+  /**
+   * The unfiltered look: the white face of an ordinary shutter.
+   *
+   * The hairline that separates a graded swatch from the preview behind it is what would
+   * otherwise draw a grey ring inside the shutter's white one, so this drops it — white on a
+   * darkened viewfinder needs no help standing out.
+   */
+  faceNatural: {
+    backgroundColor: chrome.text,
+    borderWidth: 0,
   },
   shutterLayer: {
     ...StyleSheet.absoluteFillObject,

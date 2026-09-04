@@ -27,6 +27,18 @@ settings and the shop catalogue. `src/api/endpoints.ts` is the spec and the serv
 **34 of its 36 calls**. The two left — `POST /map/sightings` and `POST /shop/purchase` — are
 each unbuilt for a stated reason rather than for want of time; see §6.
 
+> **Since 2026-08-31 this count is out of date.** The paw economy added three endpoints —
+> `GET /paws/balance`, `POST /photos/:photoId/paw`, `DELETE /photos/:photoId/paw` — so the
+> spec is 39 calls and 37 are answered. The two unbuilt ones are unchanged, and a third thing
+> is now deliberately absent for the same reason as `POST /shop/purchase`: **paws can be given
+> but not spent**, because cosmetics still have nowhere to be recorded. `TODO.md` carries the
+> detail; per the note at the top of this file, it is the current one.
+
+> **Out of date since 2026-08-31 as well.** Two migrations have been written since that
+> probe — `2026-08-28_five_reactions.sql` and `2026-08-29_paws.sql` — and nothing records
+> either as applied. Re-probe; `schema-state.mjs` now covers the paw tables and structurally
+> cannot cover the reaction one. See `TODO.md`.
+
 **The schema is now fully applied.** All eleven migrations are on the live project as of
 2026-08-14, confirmed by `node scripts/schema-state.mjs` rather than by anybody's memory — which
 matters, because this section spent most of the project's life tracking that by hand. Trap 17 is
