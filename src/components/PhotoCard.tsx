@@ -342,7 +342,7 @@ const styles = StyleSheet.create({
     aspectRatio: 4 / 5,
   },
   noPhoto: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
   },

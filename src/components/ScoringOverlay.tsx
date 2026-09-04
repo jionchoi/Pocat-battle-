@@ -215,7 +215,7 @@ const DOT_SIZE = 12;
 
 const styles = StyleSheet.create({
   scrim: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0, 0, 0, 0.58)',
   },
   /**
@@ -232,7 +232,7 @@ const styles = StyleSheet.create({
     transformOrigin: 'bottom',
   },
   centre: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: spacing.xl,

@@ -205,7 +205,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   fill: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     // scaleX grows from the centre by default; this anchors growth to the left edge.
     transformOrigin: 'left',
   },

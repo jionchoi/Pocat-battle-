@@ -244,7 +244,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   scrim: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   /**
    * One surface, not a shell wrapping a core. The sheet already separates itself from

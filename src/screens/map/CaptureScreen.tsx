@@ -688,11 +688,18 @@ function RejectionNotice({
  * The two platforms answer this question in different vocabularies and both have to be
  * handled, because the whole point is to stop relying on a default.
  *
- * **iOS** returns `AVCaptureSession` preset names alongside dimensions — `'photo'`, `'high'`,
- * `'medium'`, `'low'`, `'1920x1080'`. `'photo'` is not one size among them: it is the preset
+ * **iOS** returns `AVCaptureSession` preset names alongside dimensions — `'Photo'`, `'High'`,
+ * `'Medium'`, `'Low'`, `'1920x1080'`. `'Photo'` is not one size among them: it is the preset
  * meaning "full-resolution still capture", which is the sensor's native photograph and is
  * larger than any of the numbered video presets. So it wins outright when present, and
  * comparing it by area is impossible anyway — it has no digits to parse.
+ *
+ * **The preset names are capitalised, and matching them lowercase was the bug.** iOS spells
+ * this one `'Photo'` (`PictureSize.photo`'s raw value in `expo-camera`), so an exact test for
+ * `'photo'` never matched, fell through to the numbered list, and picked `'3840x2160'` — a 4K
+ * *video* preset. That is the opposite of what this function exists to do: it capped stills at
+ * 16:9 8MP instead of the sensor's full 4:3 frame, and it left the session on a preset the
+ * next lens switch could fail to satisfy.
  *
  * **Android** returns plain `WxH` strings, so the largest is the largest by pixel area. Area
  * rather than width: a device can offer both 4:3 and 16:9 at the same width, and the 4:3 one
@@ -703,8 +710,10 @@ function RejectionNotice({
 export function largestPictureSize(sizes: readonly string[]): string | undefined {
   if (sizes.length === 0) return undefined;
 
-  // iOS: the full-resolution still preset outranks every numbered one. See above.
-  if (sizes.includes('photo')) return 'photo';
+  // iOS: the full-resolution still preset outranks every numbered one. See above. Matched
+  // case-insensitively and returned as reported, because the casing is the library's to choose.
+  const photo = sizes.find((size) => size.trim().toLowerCase() === 'photo');
+  if (photo) return photo;
 
   let best: string | undefined;
   let bestArea = 0;
@@ -775,7 +784,7 @@ const styles = StyleSheet.create({
    * glass. Preview and file are reconciled there, not here — see `sixteenNineCrop`.
    */
   viewfinder: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     /*
      * Contains the filter's blend mode, and clips it to the picture.
      *
@@ -795,7 +804,7 @@ const styles = StyleSheet.create({
    * below the point where the viewfinder stops matching the shot.
    */
   grain: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: '#000000',
     opacity: 0.03,
   },
@@ -817,7 +826,7 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   rejection: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: arena.scrim,
     justifyContent: 'flex-end',
     padding: spacing.md,

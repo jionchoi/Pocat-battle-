@@ -358,7 +358,7 @@ const styles = StyleSheet.create({
   },
   /** Weighted to the foot, where the name and the score sit. */
   winnerScrim: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     top: '40%',
     backgroundColor: 'rgba(11, 11, 12, 0.46)',
   },
@@ -414,7 +414,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   runnerUpScrim: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     top: '45%',
     backgroundColor: 'rgba(11, 11, 12, 0.42)',
   },

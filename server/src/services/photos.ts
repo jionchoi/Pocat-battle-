@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabase.js';
-import { scorePhoto } from '../lib/openai.js';
+import { scorePhoto, scoringAvailable } from '../lib/openai.js';
 import { assertOwnedPath, deletePhotoObject, downloadPhoto } from '../lib/storage.js';
 import { HttpError } from '../middleware/errorHandler.js';
 import {
@@ -1049,8 +1049,54 @@ async function applyScore(
     return {
       scored: false,
       reason: 'scoring_failed',
-      message: 'We tried a few times and could not score that one. Take another shot.',
+      message:
+        'We tried a few times and could not score that one. Take another shot — none of your free scores were used.',
     };
+  }
+
+  /*
+   * No scorer, so no call, so nothing to meter.
+   *
+   * `scorePhoto` refuses with a 503 when nothing is configured, and that refusal never
+   * reaches the network: no request is made and nobody is billed. Counting it was charging a
+   * player three retries for the server's own missing configuration and then locking the
+   * photograph out for good, because `scoring_attempts` is never reset by anything.
+   *
+   * Tested here rather than caught below, because by the time the throw arrives the attempt
+   * has already been written and there is no way back to it.
+   */
+  if (!scoringAvailable()) {
+    return {
+      scored: false,
+      reason: 'scoring_failed',
+      message:
+        'Scoring is unavailable right now. Your photo is saved — reveal it again later and it will cost you nothing.',
+    };
+  }
+
+  /*
+   * The bytes, and deliberately before the counter.
+   *
+   * This is a read out of our own storage rather than a model call: it costs nothing, so a
+   * missing or unreadable object must not spend one of a photograph's three attempts. It
+   * used to share a `try` with the call below, which is what made the two indistinguishable
+   * — and the free one was being charged at the same rate as the paid one.
+   */
+  let image: Buffer;
+
+  try {
+    image = await downloadPhoto(row.storage_path);
+  } catch (err) {
+    const message =
+      err instanceof HttpError
+        ? err.message
+        : 'We could not read that photo just now. It is saved in your album.';
+
+    if (!(err instanceof HttpError)) {
+      console.error('[scoring] could not read', row.storage_path, err);
+    }
+
+    return { scored: false, reason: 'scoring_failed', message };
   }
 
   /*
@@ -1059,6 +1105,10 @@ async function applyScore(
    * The whole risk being defended against is a call that costs money and then fails, and a
    * counter incremented afterwards is not incremented on exactly that path — which is to
    * say it would count the calls that were free and miss the ones that were not.
+   *
+   * Everything above this line is a reason not to call at all, and none of those reasons
+   * cost anything, so none of them are counted any more. Past this point a call is genuinely
+   * about to be made, which is what an attempt was always meant to mean.
    *
    * A failure to record the attempt aborts the attempt. Refusing to score is a bad minute
    * for one player; scoring without being able to count it is an unmetered endpoint.
@@ -1080,19 +1130,16 @@ async function applyScore(
     };
   }
 
-  let image: Buffer;
   let judged: Awaited<ReturnType<typeof scorePhoto>>;
 
   /*
-   * Everything that talks to something outside this process, in one try.
+   * The call, alone in its own `try`.
    *
-   * Reading the object and calling the model are separate failures with the same remedy —
-   * wait a moment and reveal it again — so they are one branch here. Their messages are
-   * already written for a player to read, which is why the message travels rather than
-   * being replaced by something generic on the way out.
+   * A failure here has already cost whatever the provider charges for a request that went
+   * wrong, which is precisely the case the counter above exists to bound. This is the only
+   * failure in the function that is allowed to consume an attempt.
    */
   try {
-    image = await downloadPhoto(row.storage_path);
     judged = await scorePhoto(image);
   } catch (err) {
     const message =

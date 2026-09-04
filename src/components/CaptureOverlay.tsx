@@ -501,7 +501,7 @@ const styles = StyleSheet.create({
     borderWidth: 0,
   },
   shutterLayer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
   },

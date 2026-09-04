@@ -1449,7 +1449,7 @@ const styles = StyleSheet.create({
    * should read as the frame the picture sits in, not as the app showing through.
    */
   photoLayer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: chrome.fill,
   },
   /**
@@ -1586,7 +1586,7 @@ const styles = StyleSheet.create({
     color: paper.textFaint,
   },
   noPhoto: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
   },
