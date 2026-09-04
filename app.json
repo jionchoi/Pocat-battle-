@@ -65,7 +65,11 @@
           "photosPermission": "Cat Frame saves the photos you took to your library when you ask it to.",
           "isAccessMediaLocationEnabled": false
         }
-      ]
+      ],
+      "expo-image",
+      "expo-splash-screen",
+      "expo-sqlite",
+      "expo-status-bar"
     ],
     "extra": {
       "apiBaseUrl": "http://localhost:4000"
