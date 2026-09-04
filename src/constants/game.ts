@@ -11,7 +11,15 @@ import type { PoseClass, Rarity, Reaction } from '../models';
 
 export const RARITIES: readonly Rarity[] = ['Common', 'Rare', 'Epic', 'Legendary'];
 
-export const REACTIONS: readonly Reaction[] = ['laugh', 'love', 'wow'];
+/**
+ * The reaction set, in the order the picker lays it out.
+ *
+ * Order is left-to-right on the tapback tray and it is deliberate: love first because it is
+ * the one people reach for without thinking, fire last because it is the one they reach for
+ * on purpose. Mirrors `REACTIONS` in server/src/game/community.ts — if you add one here,
+ * add it there and widen the `votes_reaction_known` constraint in the same change.
+ */
+export const REACTIONS: readonly Reaction[] = ['love', 'laugh', 'wow', 'melt', 'fire'];
 
 export const POSE_CLASSES: readonly PoseClass[] = [
   'sitting',
@@ -185,6 +193,59 @@ export const COMMUNITY_CONFIG = {
   scoreScale: 1000,
 } as const;
 
+/**
+ * The paw economy (mirrors `server/src/game/paws.ts`).
+ *
+ * Paws are the currency. They are given to other players' photographs, and spent on score
+ * reveals and on catalogue items that carry a paw price.
+ *
+ * **Giving** moves nothing ranked — the shop's header, "Nothing here changes a score", stays
+ * true of every gift. **Spending on a reveal earns XP**, and therefore rank, which is a
+ * deliberate 2026-08-31 change: revealing is the act being rewarded and the reward goes to
+ * whoever paid. Rank unlocks cosmetics only, so this buys progression and still not power.
+ *
+ * Two of these are here because the client has to *say* them before the server answers: the
+ * confirmation toast reads "1 paw given · 6 left this week" in the same frame as the tap, which
+ * means the client predicts both the bucket and the remaining count. The server's reply
+ * overwrites the guess, so a drift here is a wrong sentence rather than a wrong balance — but a
+ * wrong sentence about somebody's money is still the app lying, so `check-paws.ts` asserts the
+ * two copies agree.
+ *
+ * **A gift is final.** There is no undo window here because there is no undo; see the note at
+ * the top of `server/src/game/paws.ts` for why that was cut.
+ */
+export const PAW_CONFIG = {
+  /** Paws granted each period. Free, automatic, and expiring. */
+  grant: 7,
+  /**
+   * How long a grant lasts. 168 hours is a week.
+   *
+   * The server's `PAW_GRANT_WINDOW_HOURS` is the copy that decides; this one words the
+   * "left this week" half of the toast, so the two have to move together.
+   */
+  grantWindowHours: 168,
+  /**
+   * What a score reveal costs in paws.
+   *
+   * Mirrors `PAW_REVEAL_COST` in `server/src/game/paws.ts`, which is the copy that charges —
+   * this one draws the button, and `check-paws.ts` asserts they agree. A button offering a
+   * price the server will not honour is the app quoting a number it cannot keep.
+   *
+   * The same price for your own photograph and for somebody else's, deliberately: the model
+   * call costs us the same either way, and a player cannot tell that "yours is cheaper" is
+   * about our bill rather than their standing.
+   */
+  revealCost: 3,
+  /**
+   * How long the "1 paw given" toast stays up, in milliseconds.
+   *
+   * Longer than the 3.2s default. There is nothing to press on it, but it is the only place
+   * the two buckets are ever explained — and a sentence a player has to catch is a sentence
+   * that teaches nobody.
+   */
+  giftToastMs: 5_000,
+} as const;
+
 /** Community score as a percentage string, or null when it is not yet meaningful. */
 export function communityLabel(
   communityScore: number,
@@ -239,7 +300,30 @@ export const SCORE_LABELS = {
 } as const;
 
 export const REACTION_LABELS: Record<Reaction, string> = {
-  laugh: 'Funny',
   love: 'Love it',
+  laugh: 'Funny',
   wow: 'Wow',
+  melt: 'Melting',
+  fire: 'Fire',
+};
+
+/**
+ * The face each reaction wears.
+ *
+ * The one place in the product with emoji in it, and it is a deliberate exception to the
+ * no-emoji rule in `theme/index.ts` rather than an oversight. Everywhere else a glyph is
+ * *chrome* — it labels a control, and Phosphor's neutral line work is right for that. A
+ * reaction is not chrome: it is the reader's own voice on somebody else's photograph, and
+ * every messaging app the player has ever used spells that with these exact five shapes.
+ * A monochrome smiley in that slot reads as a settings row.
+ *
+ * `REACTION_LABELS` carries the text, so nothing is conveyed by the emoji alone — screen
+ * readers get the words.
+ */
+export const REACTION_EMOJI: Record<Reaction, string> = {
+  love: '❤️',
+  laugh: '😂',
+  wow: '😮',
+  melt: '🥹',
+  fire: '🔥',
 };

@@ -75,6 +75,45 @@ export function xpForScore(scoreTotal: number): number {
   return Math.round(scoreTotal);
 }
 
+/**
+ * How much more XP a reveal is worth when the photograph is somebody else's.
+ *
+ * ## Both people are paid, and the one who spent gets more
+ *
+ * A paid reveal credits two accounts. The **photographer** gets exactly what they would have
+ * got revealing it themselves — the score's XP and, if it beats their record, the best score.
+ * Nothing is taken from them by somebody else pressing the button; from their side it is
+ * indistinguishable from having revealed it, except that it was free.
+ *
+ * The **unlocker** gets this multiple of the same figure. More than the photographer, and more
+ * than they would earn revealing one of their own, because unlocking somebody else's is the
+ * act being encouraged and it is the only one of the two that costs paws. A reveal you paid
+ * for that paid you the same as a free one would be a button nobody presses twice.
+ *
+ * ## This number is not settled
+ *
+ * A placeholder with a real value in it, like `PAW_REVEAL_COST` beside it in `game/paws.ts`.
+ * **It is one line.** What it trades: raise it and buying reveals becomes the fastest way to
+ * rank, which makes generosity the route to progression and also makes rank partly a measure
+ * of spending; lower it toward 1 and the bonus stops being a reason to do it at all.
+ *
+ * The brake on the obvious abuse is not this number. Paws for spending come only from being
+ * *given* them — the weekly grant cannot be spent — so farming XP this way requires other
+ * people to have chosen to give you paws first, and there is no way to buy your way in.
+ */
+export const FOREIGN_REVEAL_XP_MULTIPLIER = 2;
+
+/**
+ * XP for revealing a photograph that is not yours.
+ *
+ * Rounded once, at the end, so the multiplier cannot introduce a fraction into a column that
+ * holds whole numbers. Shares `xpForScore`'s refusals rather than restating them: a broken
+ * score is worth nothing, whoever is being paid for it.
+ */
+export function xpForRevealingAnother(scoreTotal: number): number {
+  return Math.round(xpForScore(scoreTotal) * FOREIGN_REVEAL_XP_MULTIPLIER);
+}
+
 /* -------------------------------------------------------------------------- */
 /* The ramp                                                                   */
 /* -------------------------------------------------------------------------- */

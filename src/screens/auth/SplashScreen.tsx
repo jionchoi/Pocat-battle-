@@ -10,6 +10,8 @@ import Animated, {
 } from 'react-native-reanimated';
 import { PawPrint } from 'phosphor-react-native';
 
+import { useStatusBarStyle } from '../../components/Screen';
+
 import {
   paper,
   marmalade,
@@ -29,6 +31,13 @@ import {
  */
 export function SplashScreen() {
   const reduceMotion = useReduceMotion();
+
+  /*
+   * The first surface the app ever paints, and a paper one. Set here rather than left to the
+   * platform default so a cold start into the camera and back does not begin with a white
+   * clock on a white splash. The hook works outside a navigator, which this screen is.
+   */
+  useStatusBarStyle('dark');
 
   const mark = useSharedValue(0);
   const wordmark = useSharedValue(0);

@@ -14,11 +14,13 @@ import {
   RankPill,
   ShowcaseTile,
   StatRail,
+  TrophyCase,
   SHOWCASE_LIMIT,
 } from '../../components/ProfileParts';
 import { EmptyState, InlineError } from '../../components/EmptyState';
 import { BackButton, Screen, SectionHeader } from '../../components/Screen';
 import { SkeletonBlock } from '../../components/Skeleton';
+import { PLACEHOLDER_TROPHIES, SHOW_PLACEHOLDERS } from '../../constants/placeholders';
 import { RARITIES, rankProgress, rankTitle } from '../../constants/game';
 import { useBoardStanding } from '../../hooks/useBoardStanding';
 import type { PublicProfile } from '../../models';
@@ -154,6 +156,32 @@ export function PublicProfileScreen({ navigation, route }: Props) {
       />
 
       {standing ? <BoardTrophy entry={standing} label="On the board" /> : null}
+
+      {/*
+        Their wins, above the showcase.
+
+        Order is the argument: the showcase is what this photographer *chose* to put in front
+        of you, and a win is what the field decided regardless of what they would have picked.
+        The one that was not curated goes first.
+
+        `challengeTrophies` is optional on the payload so a client running against an older
+        server draws nothing here rather than throwing — see the note on the model.
+      */}
+      <TrophyCase
+        trophies={
+          profile.challengeTrophies?.length
+            ? profile.challengeTrophies
+            : SHOW_PLACEHOLDERS
+              ? PLACEHOLDER_TROPHIES
+              : []
+        }
+        onPress={(trophy) =>
+          navigation.navigate('ChallengeEntries', {
+            challengeId: trophy.challengeId,
+            title: trophy.title,
+          })
+        }
+      />
 
       <SectionHeader
         title="Showcase"

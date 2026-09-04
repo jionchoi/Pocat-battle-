@@ -106,11 +106,17 @@ export const AlbumFullSheet = React.memo(function AlbumFullSheet({
                 disabled={busy}
                 accessibilityRole="checkbox"
                 accessibilityState={{ checked: isSelected }}
-                accessibilityLabel={
+                /*
+                  The tile already draws an em dash for an unscored photo; the label it reads
+                  out said "scoring 0", which is the confident verdict the dash exists to
+                  avoid. Screen-reader users were the only ones still being told the zero.
+                */
+                accessibilityLabel={[
                   photo.catNickname
-                    ? `Photo of ${photo.catNickname}, scoring ${photo.scores.total}`
-                    : `Unidentified photo, scoring ${photo.scores.total}`
-                }
+                    ? `Photo of ${photo.catNickname}`
+                    : 'Unidentified photo',
+                  photo.scoredAt ? `scoring ${photo.scores.total}` : 'not scored yet',
+                ].join(', ')}
                 accessibilityHint="Select this photo to delete it"
                 style={[
                   styles.tile,

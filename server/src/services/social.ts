@@ -6,6 +6,7 @@ import { serializeUser, type ProfileRow } from '../serializers/user.js';
 import { serializePhoto, type PhotoRow } from '../serializers/photo.js';
 import { friendIdsOf, profilesFor } from './friends.js';
 import { nicknamesFor } from './catNames.js';
+import { challengeWins } from './challenges.js';
 
 /**
  * Leaderboards, search, and somebody else's profile.
@@ -317,9 +318,9 @@ export async function publicProfile(viewerId: string, userId: string) {
     showcase.map((row) => row.cat_id).filter((id): id is string => id !== null)
   );
 
-  const [catsDiscovered, challengeWins] = await Promise.all([
+  const [catsDiscovered, challengeTrophies] = await Promise.all([
     countDiscovered(userId),
-    countChallengeWins(userId),
+    challengeWins(userId),
   ]);
 
   return {
@@ -333,7 +334,14 @@ export async function publicProfile(viewerId: string, userId: string) {
     totalPhotos: shared.length,
     catsDiscovered,
     bestScore,
-    challengeWins,
+    /*
+     * The count and the wins come from one query now, so the rail and the trophy case under
+     * it cannot disagree. They could before: the count came from its own `head: true` count
+     * over the same rows, and a photograph deleted between the two reads left the rail
+     * saying "3 wins" above two tiles.
+     */
+    challengeWins: challengeTrophies.length,
+    challengeTrophies,
   };
 }
 
@@ -349,24 +357,3 @@ async function countDiscovered(userId: string): Promise<number> {
   return count ?? 0;
 }
 
-async function countChallengeWins(userId: string): Promise<number> {
-  const { data, error } = await supabase
-    .from('challenges')
-    .select('winning_photo_id')
-    .not('winning_photo_id', 'is', null);
-
-  if (error) throw error;
-
-  const photoIds = (data ?? []).map((row) => row.winning_photo_id as string);
-  if (photoIds.length === 0) return 0;
-
-  const { count, error: countError } = await supabase
-    .from('photos')
-    .select('id', { count: 'exact', head: true })
-    .in('id', photoIds)
-    .eq('owner_id', userId);
-
-  if (countError) throw countError;
-
-  return count ?? 0;
-}

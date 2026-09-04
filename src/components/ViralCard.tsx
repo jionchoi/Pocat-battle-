@@ -9,8 +9,11 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { Image } from 'expo-image';
-import { Heart, Smiley, StarFour } from 'phosphor-react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { PawPrint } from 'phosphor-react-native';
 
+import { REACTIONS, REACTION_EMOJI } from '../constants/game';
+import { SHOW_PLACEHOLDERS } from '../constants/placeholders';
 import type { PhotoWithAuthor } from '../models';
 import { RarityBadge, ScoreChip } from './Badge';
 import {
@@ -53,10 +56,20 @@ import { compactNumber } from '../utils/format';
 /**
  * Legibility scrim under overlaid text.
  *
- * Two stacked stops rather than one flat wash: a single black overlay across the bottom
- * third visibly dirties the photo, whereas a fall-off that reaches zero by the halfway
- * mark leaves the subject untouched. RN has no background gradient, so the ramp is real
- * layers — the cost of that is why there are two and not eight.
+ * **A real gradient, and it used to be two flat blocks.** The intent was always a ramp that
+ * reaches zero by the halfway mark and leaves the subject untouched — but it was built as two
+ * bottom-anchored views with solid `backgroundColor`s, one 55% tall and one 32%, stacked. A
+ * flat colour does not fall off. What that actually drew was a black box across the bottom
+ * half of every card with a hard edge where the taller block ended, which is the opposite of
+ * a scrim: it dirtied the photograph instead of holding the type over it.
+ *
+ * `expo-linear-gradient` is already a dependency and `PhotoDetailScreen` was already using it
+ * for exactly this, so the ramp is a real ramp now and the three stops are the same ones —
+ * transparent, the light stop, then the dense one at the base.
+ *
+ * `locations` rather than even thirds: the transparent half has to stay transparent, so the
+ * ramp does not start until the fall-off point and then accelerates into the foot where the
+ * text actually sits.
  */
 const Scrim = React.memo(function Scrim({
   variant = 'card',
@@ -66,26 +79,16 @@ const Scrim = React.memo(function Scrim({
   const poster = variant === 'poster';
 
   return (
-    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-      <View
-        style={[
-          styles.scrimUpper,
-          {
-            height: poster ? '55%' : '45%',
-            backgroundColor: poster ? photoScrim.posterTop : photoScrim.cardTop,
-          },
-        ]}
-      />
-      <View
-        style={[
-          styles.scrimLower,
-          {
-            height: poster ? '32%' : '26%',
-            backgroundColor: poster ? photoScrim.posterBottom : photoScrim.cardBottom,
-          },
-        ]}
-      />
-    </View>
+    <LinearGradient
+      pointerEvents="none"
+      colors={[
+        'rgba(0, 0, 0, 0)',
+        poster ? photoScrim.posterTop : photoScrim.cardTop,
+        poster ? photoScrim.posterBottom : photoScrim.cardBottom,
+      ]}
+      locations={poster ? [0.45, 0.72, 1] : [0.55, 0.8, 1]}
+      style={StyleSheet.absoluteFill}
+    />
   );
 });
 
@@ -101,23 +104,27 @@ const NoPhoto = React.memo(function NoPhoto({ context }: { context: ContextName 
 });
 
 /**
- * Per-reaction counts.
+ * What people said, at poster size.
  *
- * Split into the three reactions rather than summed into one "reactions" figure: the mix
- * is the interesting part — a photo that made 200 people laugh is a different photo from
- * one that made 200 people go "wow", and a single total throws that away. Zero counts are
- * dropped rather than shown as `0`, so a new photo does not display a row of failures.
+ * The faces themselves and one total, not a count per reaction. Per-reaction counts are the
+ * right call in the reaction *bar*, where there is a whole row for them and pressing one is
+ * the point; on a rank-3 poster at a third of the screen width there is no row — the old
+ * version printed three icon-and-count pairs beside a score, and each pair got about eleven
+ * points of width. The stack keeps the mix legible (which faces, in what order) and spends
+ * one number instead of three.
+ *
+ * Two faces, not three. The card is smaller than a feed post's summary and the leading two
+ * already answer what kind of photo this is.
+ *
+ * Zero counts are dropped rather than drawn as `0`, so a photo nobody has reacted to yet
+ * shows nothing instead of a row of noughts.
  */
-const REACTION_GLYPHS = [
-  { key: 'laugh', Glyph: Smiley },
-  { key: 'love', Glyph: Heart },
-  { key: 'wow', Glyph: StarFour },
-] as const;
+const POSTER_FACES = 2;
 
 const ReactionRow = React.memo(function ReactionRow({
   photo,
   tone,
-  size = 11,
+  size = 12,
 }: {
   photo: PhotoWithAuthor;
   tone: 'onPhoto' | 'onPaper';
@@ -126,19 +133,26 @@ const ReactionRow = React.memo(function ReactionRow({
   const onPhoto = tone === 'onPhoto';
   const color = onPhoto ? 'rgba(255,255,255,0.9)' : contextColors('paper').text;
 
-  const shown = REACTION_GLYPHS.filter(({ key }) => photo.reactions[key] > 0);
+  const shown = REACTIONS.filter((key) => (photo.reactions[key] ?? 0) > 0)
+    .sort((a, b) => (photo.reactions[b] ?? 0) - (photo.reactions[a] ?? 0))
+    .slice(0, POSTER_FACES);
+
   if (shown.length === 0) return null;
+
+  const total = REACTIONS.reduce((sum, key) => sum + (photo.reactions[key] ?? 0), 0);
 
   return (
     <View style={styles.reactionRow}>
-      {shown.map(({ key, Glyph }) => (
-        <View key={key} style={styles.reaction}>
-          <Glyph size={size} weight="fill" color={color} />
-          <Text style={[text.statSm, { color }]}>
-            {compactNumber(photo.reactions[key])}
-          </Text>
-        </View>
+      {shown.map((key) => (
+        <Text
+          key={key}
+          allowFontScaling={false}
+          style={[styles.reactionFace, { fontSize: size, lineHeight: size * 1.25 }]}
+        >
+          {REACTION_EMOJI[key]}
+        </Text>
       ))}
+      <Text style={[text.statSm, { color }]}>{compactNumber(total)}</Text>
     </View>
   );
 });
@@ -218,6 +232,9 @@ export const TrendingCard = React.memo(function TrendingCard({
 }) {
   const motion = useCardMotion(index);
 
+  /** The one field that says whether `scores` and `tier` mean anything. See `PhotoCard`. */
+  const scored = photo.scoredAt !== null;
+
   return (
     <Animated.View style={[motion.animated, style]}>
       <Pressable
@@ -225,7 +242,11 @@ export const TrendingCard = React.memo(function TrendingCard({
         onPressIn={motion.onPressIn}
         onPressOut={motion.onPressOut}
         accessibilityRole="button"
-        accessibilityLabel={`Number ${rank}, ${photo.catNickname} by ${photo.author.username}, scored ${photo.scores.total}, ${photo.tier}`}
+        accessibilityLabel={
+          scored
+            ? `Number ${rank}, ${photo.catNickname} by ${photo.author.username}, scored ${photo.scores.total}, ${photo.tier}`
+            : `Number ${rank}, ${photo.catNickname} by ${photo.author.username}, not scored yet`
+        }
         style={[styles.trendingCard, { aspectRatio: aspect }]}
       >
         <Image
@@ -243,21 +264,52 @@ export const TrendingCard = React.memo(function TrendingCard({
           <View style={styles.rankDisc}>
             <Text style={[text.statSm, styles.rankNumeral]}>{rank}</Text>
           </View>
-          <RarityBadge rarity={photo.tier} size="sm" compact={compact} />
+          {scored ? <RarityBadge rarity={photo.tier} size="sm" compact={compact} /> : null}
         </View>
 
+        {/*
+          Two lines about the cat, and neither is drawn empty.
+
+          It used to be the cat's name over "author · tier", which spent the poster's only
+          two lines on things the reader can get elsewhere: the tier is already a badge in
+          the top corner of this same card, and the author is a tap away on the photo. What
+          is *not* anywhere else is what the app noticed — the Dex name it matched the animal
+          to, and the tag the scorer put on the moment ("Caught mid-yawn"). Those are the two
+          lines now.
+
+          Both are conditional, and that is the point rather than a nicety. A cat nobody has
+          identified has no Dex entry, and a photograph the scorer found nothing remarkable in
+          has no tag. Printing a placeholder for either — "Unidentified", "No tags" — fills
+          the poster with the app apologising. The line simply is not there, and the
+          photograph gets the space.
+        */}
         <View style={styles.posterFoot} pointerEvents="none">
-          <Text style={[text.h3, styles.posterName]} numberOfLines={1}>
-            {photo.catNickname}
-          </Text>
-          <Text style={[text.captionSm, styles.posterMeta]} numberOfLines={1}>
-            {compact ? photo.tier : `${photo.author.username} · ${photo.tier}`}
-          </Text>
+          {photo.catNickname ? (
+            <Text style={[text.h3, styles.posterName]} numberOfLines={1}>
+              {photo.catNickname}
+            </Text>
+          ) : null}
+
+          {photo.badges.length > 0 ? (
+            <Text style={[text.captionSm, styles.posterMeta]} numberOfLines={1}>
+              {photo.badges.join(' · ')}
+            </Text>
+          ) : null}
 
           <View style={styles.posterScoreRow}>
-            <Text style={[text.h3, styles.posterScore]}>{photo.scores.total}</Text>
-            {/* The reaction glyphs are the first thing to go when the card narrows —
-                three icon-and-count pairs do not fit beside a score at a third width. */}
+            {/*
+              A number here means a verdict. An unscored capture carries a zero it did not
+              earn, so the poster said "0" where the score goes — see `ScoreChip`, which has
+              drawn a lock for this case all along.
+
+              Run up from 13pt: it is the one figure on the card that is the card's whole
+              claim, and at caption size it was losing to the cat's name above it.
+            */}
+            <Text style={[text.statMd, styles.posterScore]}>
+              {scored ? photo.scores.total : '—'}
+            </Text>
+            {/* The faces are the first thing to go when the card narrows — a stack and a
+                total do not fit beside a score at a third of the screen width. */}
             {compact ? null : <ReactionRow photo={photo} tone="onPhoto" />}
           </View>
         </View>
@@ -266,19 +318,68 @@ export const TrendingCard = React.memo(function TrendingCard({
   );
 });
 
+/**
+ * An empty slot in the trending bento.
+ *
+ * The block is a fixed five — two across, then three — and size encodes rank, so a feed with
+ * only two hot photographs used to draw two cards beside a stretch of page. That reads as a
+ * layout bug rather than as a quiet week, and it makes the bento impossible to *look at*
+ * before there is real traffic, which is the state the whole thing is being designed in.
+ *
+ * So the unfilled slots are drawn: same aspect, same radius, same rank disc in the same
+ * corner, and nothing in them. Hairline and dashed, because a solid grey block would read as
+ * a photograph that failed to load — a dashed outline is the one shape that says "this space
+ * is reserved" rather than "this is broken".
+ *
+ * Gated on `SHOW_PLACEHOLDERS`. With the flag off the slot renders as a bare spacer, which is
+ * what shipped before and what should ship again the day the feed is busy enough not to need
+ * this. See `constants/placeholders.ts`.
+ */
+export const TrendingSlot = React.memo(function TrendingSlot({
+  rank,
+  aspect = 3 / 4,
+  style,
+}: {
+  rank: number;
+  aspect?: number;
+  style?: StyleProp<ViewStyle>;
+}) {
+  if (!SHOW_PLACEHOLDERS) return <View style={style} />;
+
+  return (
+    <View
+      // Not `accessibilityElementsHidden`: a reader arriving here should be told the ranking
+      // is short rather than silently skipping a hole in the grid.
+      accessible
+      accessibilityLabel={`Number ${rank}. Nothing is ranked here yet.`}
+      style={[styles.slot, { aspectRatio: aspect }, style]}
+    >
+      <View style={styles.slotTopRow} pointerEvents="none">
+        <View style={styles.slotRankDisc}>
+          <Text style={[text.statSm, styles.slotRank]}>{rank}</Text>
+        </View>
+      </View>
+
+      <View style={styles.slotBody} pointerEvents="none">
+        <PawPrint size={20} weight="fill" color={contextColors('paper').textFaint} />
+        <Text style={[text.captionSm, styles.slotLabel]} numberOfLines={2}>
+          Open spot
+        </Text>
+      </View>
+    </View>
+  );
+});
+
 const styles = StyleSheet.create({
   /* --- shared --- */
-  scrimUpper: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  scrimLower: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
+  /**
+   * Emoji sit high in their line box on both platforms, and they ignore `color`. Pinning the
+   * line height to the size is what keeps a face vertically centred against the tabular
+   * numeral beside it; `allowFontScaling={false}` at the call site keeps it inside a poster
+   * that cannot grow.
+   */
+  reactionFace: {
+    textAlign: 'center',
   },
   noPhoto: {
     alignItems: 'center',
@@ -312,6 +413,42 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     justifyContent: 'flex-end',
     backgroundColor: chrome.fill,
+  },
+
+  /* --- the empty slot --- */
+  slot: {
+    width: '100%',
+    borderRadius: radii.xl,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: contextColors('paper').hairlineHi,
+    backgroundColor: contextColors('paper').sunkenSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  slotTopRow: {
+    position: 'absolute',
+    top: spacing.xs,
+    left: spacing.xs,
+  },
+  slotRankDisc: {
+    width: 20,
+    height: 20,
+    borderRadius: radii.full,
+    backgroundColor: contextColors('paper').sunken,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  slotRank: {
+    color: contextColors('paper').textFaint,
+  },
+  slotBody: {
+    alignItems: 'center',
+    gap: 5,
+  },
+  slotLabel: {
+    color: contextColors('paper').textFaint,
+    textAlign: 'center',
   },
   posterTopRow: {
     position: 'absolute',
@@ -355,8 +492,8 @@ const styles = StyleSheet.create({
   },
   posterScore: {
     color: chrome.text,
-    fontSize: 13,
-    lineHeight: 16,
+    fontSize: 18,
+    lineHeight: 21,
   },
 
 });

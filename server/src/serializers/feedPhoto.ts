@@ -1,5 +1,5 @@
 import { publicUrlFor } from '../lib/storage.js';
-import type { PhotoRow } from './photo.js';
+import type { PhotoRow, RevealCredit } from './photo.js';
 import type { Reaction } from '../game/community.js';
 
 /**
@@ -38,7 +38,9 @@ export function serializeFeedPhoto(
   row: PhotoRow,
   author: AuthorRow | null,
   counts: FeedCounts,
-  catNickname: string | null
+  catNickname: string | null,
+  /** Who unlocked the score, when it was not the photographer. See `revealCreditFor`. */
+  revealedBy: RevealCredit | null = null
 ) {
 
   return {
@@ -88,6 +90,21 @@ export function serializeFeedPhoto(
     featured: row.featured ?? false,
     reactions: counts.reactions,
     myReaction: counts.myReaction,
+
+    /*
+     * Public, and safely so. It is a count of gifts and carries nothing about who gave them —
+     * the ledger holds that, and only its owner can read their own rows.
+     */
+    pawCount: row.paw_count ?? 0,
+
+    /*
+     * Public, like the score it is about.
+     *
+     * A paid reveal publishes the score to everyone, so who paid for it is part of the same
+     * fact — and naming them is the point rather than a leak: it is a credit, and the player
+     * who spent the paws is the one it belongs to.
+     */
+    revealedBy,
 
     /*
      * Empty rather than absent when the account is gone or never finished setup.

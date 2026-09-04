@@ -5,6 +5,7 @@ import { uuidParam, validate } from '../middleware/validate.js';
 import { costlyLimit, writeLimit } from '../middleware/rateLimit.js';
 import * as photosController from '../controllers/photos.js';
 import * as votesController from '../controllers/votes.js';
+import * as pawsController from '../controllers/paws.js';
 
 const router = Router();
 
@@ -49,7 +50,13 @@ router.post(
   photosController.reveal
 );
 
-/** One photo, for the detail screen and for a deep link into somebody's own album. */
+/**
+ * One photo, for the detail screen.
+ *
+ * Answers for two readers: the owner, who gets the album serialization, and anyone else, who
+ * gets the feed one — every card in the viral feed opens this screen. See the service; the
+ * difference between the two is `capturedLocation`.
+ */
 router.get('/:photoId', authenticate, uuidParam('photoId'), photosController.detail);
 
 /**
@@ -88,6 +95,27 @@ router.post(
   uuidParam('photoId'),
   validate(votesController.voteSchema),
   votesController.vote
+);
+
+/**
+ * A paw for somebody else's photograph. Refused on your own, and refused with nothing to give.
+ *
+ * Here rather than on `/paws` because the subject of the request is the photograph, exactly as
+ * it is for a reaction. There is no body: one paw per tap, and the bucket it comes out of is
+ * the server's decision.
+ *
+ * **There is no matching DELETE.** A paw that has been given cannot be taken back — see the
+ * note at the top of `game/paws.ts`. This route has no inverse, deliberately.
+ *
+ * `writeLimit`, not `costlyLimit`. Giving spends the player's own currency rather than ours —
+ * the tier that guards paid model calls is about protecting a budget, and this touches none.
+ */
+router.post(
+  '/:photoId/paw',
+  authenticate,
+  writeLimit,
+  uuidParam('photoId'),
+  pawsController.give
 );
 
 /** Removes the row, the object in the bucket, and repairs any Dex entry pointing at it. */

@@ -26,6 +26,7 @@ import { linking } from './src/navigation/linking';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { paper } from './src/theme';
 import { useAuthStore } from './src/store/authStore';
+import { usePawStore } from './src/store/pawStore';
 import { useReactionStore } from './src/store/reactionStore';
 
 /**
@@ -73,6 +74,13 @@ export default function App() {
     // reactions come from disk. Loaded alongside the session rather than by the feed
     // screen, so the reaction buttons are never briefly wrong on first paint.
     void useReactionStore.getState().hydrate();
+    /*
+     * The same argument for paws, plus one of its own: hydrating reads the cached balance
+     * off disk and then asks the server for the real one, and that request is what *settles
+     * the weekly grant period*. Nothing in this codebase runs on a schedule, so the grant
+     * rolls forward the first time somebody looks — and launching is the first time.
+     */
+    void usePawStore.getState().hydrate();
   }, [hydrate, ready]);
 
   const onNavigationReady = useCallback(() => {

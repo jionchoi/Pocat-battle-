@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { FlatList, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Cards, Image as ImageGlyph } from 'phosphor-react-native';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
+import { useFocusEffect } from '@react-navigation/native';
 import type { CompositeScreenProps } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
@@ -45,10 +46,22 @@ export function PhotoAlbumGridScreen({ navigation }: Props) {
   const error = useAlbumStore((s) => s.error);
   const stale = useAlbumStore((s) => s.stale);
   const filters = useAlbumStore((s) => s.filters);
+  const filtered = useAlbumStore((s) => s.filtered);
+  const filtering = useAlbumStore((s) => s.filtering);
   const loadingMore = useAlbumStore((s) => s.loadingMore);
   const load = useAlbumStore((s) => s.load);
   const loadMore = useAlbumStore((s) => s.loadMore);
   const setFilters = useAlbumStore((s) => s.setFilters);
+  const clearFilters = useAlbumStore((s) => s.clearFilters);
+
+  /**
+   * What the grid draws: the filtered answer when there is one, the album otherwise.
+   *
+   * `null` and `[]` are different and the difference is load-bearing — null is "no filter
+   * set", empty is "the filter matched nothing" — which is what lets the empty state below
+   * tell those two apart and offer the right way out of each.
+   */
+  const visible = filtered ?? photos;
 
   const userId = useAuthStore((s) => s.user?.id ?? null);
   const photoCount = useAuthStore((s) => s.user?.photoCount ?? 0);
@@ -83,6 +96,28 @@ export function PhotoAlbumGridScreen({ navigation }: Props) {
     return () => clearTimeout(timer);
   }, [filters, search, setFilters]);
 
+  /*
+   * Filters do not outlive a visit to this screen.
+   *
+   * They live in a store that outlives the component, so a rarity chip left on — or one set
+   * for you by tapping a row in the profile's album breakdown — was still on the next time
+   * the album was opened, from anywhere, with nothing on screen explaining why most of the
+   * photographs were missing. A filter is a thing you do while you are looking, not a setting.
+   *
+   * Cleared on the way *out* rather than on the way in, so arriving with a filter already
+   * chosen still works: `setFilters` runs before the navigation, and clearing on focus would
+   * undo it a frame later.
+   */
+  useFocusEffect(
+    useCallback(
+      () => () => {
+        setSearch('');
+        clearFilters();
+      },
+      [clearFilters]
+    )
+  );
+
   const cardWidth = useMemo(
     () => (width - layout.gutter * 2 - layout.gridGap) / COLUMNS,
     [width]
@@ -114,8 +149,10 @@ export function PhotoAlbumGridScreen({ navigation }: Props) {
     [cardWidth, navigation, visibleIds]
   );
 
-  const loading = phase === 'loading';
-  const showEmpty = phase === 'ready' && photos.length === 0;
+  // The skeleton covers a first load and a filter equally: both are "there is nothing to
+  // show you yet", and a filter no longer borrows the pull-to-refresh spinner to say so.
+  const loading = phase === 'loading' || filtering;
+  const showEmpty = !loading && phase === 'ready' && visible.length === 0;
 
   /*
    * No paws on this screen.
@@ -148,6 +185,7 @@ export function PhotoAlbumGridScreen({ navigation }: Props) {
           value={search}
           onChangeText={setSearch}
           placeholder="Search by cat name"
+          style={styles.search}
         />
 
         <FilterChips
@@ -214,7 +252,7 @@ export function PhotoAlbumGridScreen({ navigation }: Props) {
         />
       ) : (
         <FlatList
-          data={photos}
+          data={visible}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
           numColumns={COLUMNS}
@@ -225,6 +263,14 @@ export function PhotoAlbumGridScreen({ navigation }: Props) {
           onEndReachedThreshold={0.6}
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={{ itemVisiblePercentThreshold: 40 }}
+          /*
+            Only a real refresh, never a filter.
+
+            `phase` is the album's own fetch, and `filtering` is deliberately not part of it —
+            routing a filter through here is what dropped the platform's refresh spinner from
+            the top of the screen on every chip tap, which reads as the page reloading because
+            that is exactly what it was.
+          */
           refreshControl={pawRefreshControl({
             refreshing: phase === 'refreshing',
             onRefresh: () => void load({ force: true }),
@@ -246,6 +292,16 @@ const styles = StyleSheet.create({
   header: {
     paddingHorizontal: layout.gutter,
     gap: spacing.sm,
+  },
+  /**
+   * Cancels one of the two helpings of space above the field.
+   *
+   * `ScreenHeader` carries its own `sectionPadding` — 15pt below the title — and this header
+   * column adds a 12pt `gap` on top of it, so the field sat 27pt below the title and 16pt
+   * above the chips. Removing the gap on this one edge leaves 15 and 16, which read as equal.
+   */
+  search: {
+    marginTop: -spacing.sm,
   },
   filters: {
     marginTop: spacing.xxs,

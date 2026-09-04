@@ -60,16 +60,35 @@ export async function awardForScore(
 }
 
 /**
- * XP for something that is not a photograph's score — winning a challenge, so far.
+ * XP for something that is not a photograph's score — winning a challenge, and now revealing
+ * somebody else's photograph.
  *
  * Separate entry point rather than a flag on the one above, because `best_score` must not
- * move: it is the highest single-photo score a player has ever *reached*, and a challenge
- * prize is not a photograph. Folding the two together would mean a reward could set a
- * personal best nobody photographed.
+ * move: it is the highest single-photo score a player has ever *reached*, and neither a
+ * challenge prize nor a photograph you merely paid to look at is one. Folding the two together
+ * would mean a reward could set a personal best nobody photographed — or, worse, that buying a
+ * reveal of a stranger's brilliant photo could set *your* best score with their work.
  */
 export async function awardXp(userId: string, xp: number): Promise<Award | null> {
   return credit(userId, Math.max(0, Math.round(xp)), null);
 }
+
+/*
+ * `revokeForScore` and `revokeXp` used to live here and were deleted on 2026-08-31.
+ *
+ * They took XP back when a photograph was deleted. The reason they are gone rather than merely
+ * unused: **the score's cost is not refunded on a delete, so its reward is not either.** That
+ * is the principle `2026-08-10_reveal_ledger.sql` was written to establish — the `reveals`
+ * table outlives its photo precisely so deleting one cannot hand the reveal back — and revoking
+ * the XP while keeping the charge made the player pay twice for one look.
+ *
+ * The consequence is worth stating positively, because it is now an invariant this file can be
+ * read against: **nothing here ever goes down.** `xp`, `rank` and `best_score` only rise. If
+ * something ever needs to fall, it needs a better reason than a deletion, and it should be
+ * written as its own function rather than by reviving these.
+ *
+ * See the long note in `services/photos.ts`'s delete path for the whole argument.
+ */
 
 async function credit(
   userId: string,

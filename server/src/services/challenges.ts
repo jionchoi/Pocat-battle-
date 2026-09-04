@@ -9,6 +9,7 @@ import {
   type Entrant,
 } from '../game/challenges.js';
 import { serializePhoto, type PhotoRow } from '../serializers/photo.js';
+import { publicUrlFor } from '../lib/storage.js';
 import { awardXp } from './progression.js';
 import { nicknamesFor } from './catNames.js';
 import { assembleFeedCards } from './feed.js';
@@ -213,6 +214,115 @@ async function settle(row: ChallengeRow): Promise<void> {
   if (winner && row.reward_xp > 0) {
     await awardXp(winner.userId, row.reward_xp);
   }
+}
+
+/* -------------------------------------------------------------------------- */
+/* The trophy case                                                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A win, as a profile draws it. Mirrors `ChallengeTrophy` in the client's models.
+ */
+export interface ChallengeTrophyPayload {
+  challengeId: string;
+  title: string;
+  wonAt: string;
+  photoUrl: string;
+  score: number | null;
+  tier: 'Common' | 'Rare' | 'Epic' | 'Legendary' | null;
+  icon: string | null;
+  entrants: number;
+}
+
+/**
+ * Every challenge this player won, newest first.
+ *
+ * Read by two callers that used to disagree: the profile's stat rail wanted a *count* and
+ * counted rows in one query, and the trophy case wants the wins themselves. Those are the
+ * same question asked twice, so this answers it once and the count is the array's length —
+ * which also closes the way they could drift, where a photo deleted between the two queries
+ * made the rail say "3 wins" over two tiles.
+ *
+ * ## Why the winning side is filtered here rather than in the query
+ *
+ * `winning_photo_id` points at `photos`, and there is no column on `challenges` saying whose
+ * photo it was. PostgREST can express the join, but not "and the embedded row's owner is
+ * this user" without a view — so the settled challenges come back first (there are tens of
+ * them, not thousands, and they are indexed by `ends_at`), and one `in` over their winning
+ * photo ids finds the ones that are this player's. Two round trips, both bounded.
+ *
+ * Unsettled challenges are not settled here on purpose. Settlement writes — it names a
+ * winner and pays XP — and a profile view is a read of somebody *else's* data. The hub
+ * settles on read, and a challenge that has closed but that nobody has opened yet is simply
+ * not in anyone's case until then.
+ */
+export async function challengeWins(userId: string): Promise<ChallengeTrophyPayload[]> {
+  const { data, error } = await supabase
+    .from('challenges')
+    .select('id, title, ends_at, icon, winning_photo_id')
+    .not('winning_photo_id', 'is', null)
+    .order('ends_at', { ascending: false })
+    .limit(60);
+
+  if (error) throw error;
+
+  const settled = (data ?? []) as {
+    id: string;
+    title: string;
+    ends_at: string;
+    icon: string | null;
+    winning_photo_id: string;
+  }[];
+
+  if (settled.length === 0) return [];
+
+  const { data: photoRows, error: photoError } = await supabase
+    .from('photos')
+    .select('id, storage_path, score_total, tier, scored_at')
+    .in(
+      'id',
+      settled.map((row) => row.winning_photo_id)
+    )
+    .eq('owner_id', userId);
+
+  if (photoError) throw photoError;
+
+  const mine = new Map(
+    ((photoRows ?? []) as {
+      id: string;
+      storage_path: string | null;
+      score_total: number | null;
+      tier: string | null;
+      scored_at: string | null;
+    }[]).map((row) => [row.id, row])
+  );
+
+  const won = settled.filter((row) => mine.has(row.winning_photo_id));
+  const entrants = await submissionCounts(won.map((row) => row.id));
+
+  return won.map((row) => {
+    const photo = mine.get(row.winning_photo_id)!;
+
+    return {
+      challengeId: row.id,
+      title: row.title,
+      wonAt: row.ends_at,
+      // Empty rather than absent when the file is gone. The win outlives its photograph and
+      // the client's tile has a fallback for exactly this.
+      photoUrl: photo.storage_path ? publicUrlFor(photo.storage_path) : '',
+      /*
+       * Null until the photograph was judged, rather than the zero the album serializer
+       * fills in — a trophy tile has no "not scored yet" caption beside the number to
+       * qualify it, so a zero there would read as a verdict of nought on a winning photo.
+       */
+      score: photo.scored_at ? (photo.score_total ?? 0) : null,
+      tier: photo.scored_at
+        ? ((photo.tier ?? 'Common') as 'Common' | 'Rare' | 'Epic' | 'Legendary')
+        : null,
+      icon: row.icon,
+      entrants: entrants.get(row.id) ?? 0,
+    };
+  });
 }
 
 /* -------------------------------------------------------------------------- */

@@ -177,6 +177,7 @@ export function ConfirmSheet({
   title,
   body,
   confirmLabel,
+  busy = false,
   cancelLabel = 'Cancel',
   destructive = false,
   onConfirm,
@@ -187,6 +188,15 @@ export function ConfirmSheet({
   title: string;
   body: string;
   confirmLabel: string;
+  /**
+   * True while the confirmed action is running.
+   *
+   * The confirm button becomes the paw trail and the cancel goes inert, because a destructive
+   * action that takes a network round trip left this sheet looking untouched — the same two
+   * buttons, no motion, nothing saying the tap landed. The usual answer to that was to swap
+   * the label to a present participle ("Deleting"), which is a word where a control should be.
+   */
+  busy?: boolean;
   cancelLabel?: string;
   destructive?: boolean;
   onConfirm: () => void;
@@ -207,6 +217,8 @@ export function ConfirmSheet({
           onPress={onConfirm}
           destructive={destructive}
           context={context}
+          loading={busy}
+          disabled={busy}
           fullWidth
         />
         <Button
@@ -214,6 +226,9 @@ export function ConfirmSheet({
           onPress={onCancel}
           variant="secondary"
           context={context}
+          // Inert rather than hidden: the sheet keeps its shape while the work runs, and a
+          // cancel that cannot stop what has already been sent should not pretend it can.
+          disabled={busy}
           fullWidth
         />
       </View>

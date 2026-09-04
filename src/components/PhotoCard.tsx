@@ -14,6 +14,7 @@ import { Image } from 'expo-image';
 
 import type { Photo } from '../models';
 import {
+  chrome,
   contextColors,
   elevation,
   perpetual,
@@ -39,6 +40,25 @@ import { RarityBadge, RarityPips, ScoreChip } from './Badge';
  *
  * Tier is conveyed by badge colour, glyph silhouette AND label — never colour alone.
  */
+
+/**
+ * The grid tile's caption block is a fixed height, and this is it.
+ *
+ * Two lines of `caption` for the cat's name, a 4pt gap, and one line of `captionSm` for the
+ * badges. Every album tile is therefore the same size whatever is written on it — which it
+ * was not: a photo the scorer had labelled "Caught mid-yawn" grew a third line and stood
+ * taller than the untagged photo beside it, so a two-column grid of the same square
+ * photographs came out ragged.
+ *
+ * Reserved rather than measured. Sizing the block to its tallest *actual* content would make
+ * the whole grid relayout as a badge lands, and letting `FlatList` size each row still leaves
+ * the two cards within a row disagreeing. A constant is the only version where a row is a row.
+ *
+ * Keep in step with `text.caption` (15) and `text.captionSm` (13) if either changes; the
+ * album skeleton is built from the same number so the grid does not jump when photos land.
+ */
+export const GRID_NAME_LINES = 2;
+export const GRID_META_HEIGHT = 15 * GRID_NAME_LINES + 4 + 13;
 
 export interface PhotoCardProps {
   photo: Photo;
@@ -91,7 +111,8 @@ export const PhotoCard = React.memo(function PhotoCard({
     ],
   }));
 
-  const radius = variant === 'feed' ? radii.xl : radii.lg;
+  const grid = variant === 'grid';
+  const radius = grid ? radii.lg : radii.xl;
 
   /** The one field that says whether `scores` and `tier` mean anything. */
   const scored = photo.scoredAt !== null;
@@ -116,7 +137,25 @@ export const PhotoCard = React.memo(function PhotoCard({
         }
         style={[
           styles.card,
-          { backgroundColor: c.surface, borderRadius: radius },
+          {
+            backgroundColor: c.surface,
+            borderRadius: radius,
+            /*
+             * A black outline around the whole card — photo and text together.
+             *
+             * It draws inside the box, so the image and the caption block both sit within it
+             * and the stroke closes around whatever height the name has wrapped to. That is
+             * the point of putting it here rather than on the meta strip: the card is one
+             * object, and an outline that stopped at the photograph would cut it in half.
+             *
+             * Black only on paper. `chrome.fill` is this app's one opaque dark surface value
+             * in the light context, and on an arena screen it would be a black line on a
+             * near-black card — so the dark context keeps the raised hairline that is legible
+             * there instead.
+             */
+            borderWidth: 1,
+            borderColor: context === 'arena' ? c.hairlineHi : chrome.fill,
+          },
           elevation(variant === 'feed' ? 'hairline' : 'flat', context),
         ]}
       >
@@ -159,11 +198,25 @@ export const PhotoCard = React.memo(function PhotoCard({
           </View>
         </View>
 
-        <View style={styles.meta}>
+        <View style={[styles.meta, grid && styles.metaGrid]}>
           <View style={styles.metaRow}>
+            {/*
+              Two lines, and the grid tile reserves both whether or not the name needs them.
+
+              One line truncated most cat names an owner actually types — the tile is roughly
+              half the screen wide and the name shares its line with a rarity pip — and a
+              clipped name on a card whose entire job is to say which cat this is loses the
+              one thing the caption carries. Two lines fixes that; reserving them is what
+              stops a short name and a long one producing two different card heights. See
+              `GRID_META_HEIGHT`.
+            */}
             <Text
-              style={[variant === 'feed' ? text.h3 : text.caption, styles.name, { color: c.text }]}
-              numberOfLines={1}
+              style={[
+                variant === 'feed' ? text.h3 : text.caption,
+                styles.name,
+                { color: c.text },
+              ]}
+              numberOfLines={GRID_NAME_LINES}
             >
               {name}
             </Text>
@@ -172,17 +225,32 @@ export const PhotoCard = React.memo(function PhotoCard({
             ) : null}
           </View>
 
-          {photo.caption ? (
-            <Text style={[text.bodySm, { color: c.textMuted }]} numberOfLines={2}>
-              {photo.caption}
-            </Text>
-          ) : null}
-
-          {photo.badges.length > 0 ? (
+          {/*
+            The grid tile gets exactly one metadata line and always gets it, even when there
+            is nothing to put on it. Badges lead — they are the scorer's verdict and the more
+            interesting half — with the player's own caption behind them, and a blank line
+            holding the space open when the photograph has neither. That blank is the point:
+            it is what makes an untagged tile the same height as a tagged one.
+          */}
+          {grid ? (
             <Text style={[text.captionSm, { color: c.textFaint }]} numberOfLines={1}>
-              {photo.badges.join(' · ')}
+              {photo.badges.length > 0 ? photo.badges.join(' · ') : (photo.caption ?? '')}
             </Text>
-          ) : null}
+          ) : (
+            <>
+              {photo.caption ? (
+                <Text style={[text.bodySm, { color: c.textMuted }]} numberOfLines={2}>
+                  {photo.caption}
+                </Text>
+              ) : null}
+
+              {photo.badges.length > 0 ? (
+                <Text style={[text.captionSm, { color: c.textFaint }]} numberOfLines={1}>
+                  {photo.badges.join(' · ')}
+                </Text>
+              ) : null}
+            </>
+          )}
 
           {footer}
         </View>
@@ -284,9 +352,19 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xs + 2,
     gap: spacing.xxs,
   },
+  /** See `GRID_META_HEIGHT`. The one thing that makes two album tiles the same object. */
+  metaGrid: {
+    height: GRID_META_HEIGHT + spacing.xs + spacing.xs + 2,
+    justifyContent: 'flex-start',
+  },
   metaRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    /*
+     * Top-aligned, not centred. A name that has wrapped to two lines is taller than the pip
+     * beside it, and centring would float the pip into the middle of the name's second line
+     * instead of keeping it on the first, where it reads as belonging to the row.
+     */
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: spacing.xs,
   },

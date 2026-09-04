@@ -12,8 +12,9 @@ import { pawRefreshControl } from '../../components/PawRefresh';
 import { Screen, ScreenHeader } from '../../components/Screen';
 import { PhotoCardSkeleton } from '../../components/Skeleton';
 import { showToast } from '../../components/Toast';
+import { usePawGift } from '../../hooks/usePawGift';
 import { usePhotoImpressions } from '../../hooks/usePhotoImpressions';
-import { VoteRow } from '../../components/VoteButton';
+import { ReactionBar } from '../../components/ReactionBar';
 import type { PhotoWithAuthor, Reaction } from '../../models';
 import { useAuthStore } from '../../store/authStore';
 import { paper, layout, spacing, text } from '../../theme';
@@ -80,6 +81,18 @@ export function ChallengeEntriesScreen({ route, navigation }: Props) {
     void load();
   }, [load]);
 
+  /** Where a photo lives in this list, for `usePawGift`. See the note in CommunityFeedScreen. */
+  const patchEntry = useCallback(
+    (photoId: string, apply: (photo: PhotoWithAuthor) => PhotoWithAuthor) => {
+      setEntries((current) =>
+        current.map((entry) => (entry.id === photoId ? apply(entry) : entry))
+      );
+    },
+    []
+  );
+
+  const givePaw = usePawGift(patchEntry);
+
   const react = useCallback(
     async (photoId: string, reaction: Reaction) => {
       const previous = entries;
@@ -144,10 +157,13 @@ export function ChallengeEntriesScreen({ route, navigation }: Props) {
             navigation.navigate('PublicProfile', { userId: item.author.id })
           }
           footer={
-            <VoteRow
+            <ReactionBar
+              photoId={item.id}
               reactions={item.reactions}
               myReaction={item.myReaction}
               onReact={(reaction) => void react(item.id, reaction)}
+              pawCount={item.pawCount}
+              onGivePaw={() => givePaw(item)}
               disabled={item.ownerId === myId}
               style={styles.votes}
             />
@@ -155,7 +171,7 @@ export function ChallengeEntriesScreen({ route, navigation }: Props) {
         />
       </View>
     ),
-    [myId, navigation, react]
+    [givePaw, myId, navigation, react]
   );
 
   return (

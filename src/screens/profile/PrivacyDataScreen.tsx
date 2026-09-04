@@ -121,7 +121,7 @@ export function PrivacyDataScreen() {
       <Card>
         <Text style={[text.bodySm, styles.detail]}>
           Other players can see your photographer name, avatar, rank, the photos you shared,
-          and up to six showcase cats. They cannot see your email, your Treat balance, your
+          and up to six showcase cats. They cannot see your email, your paw balance, your
           full collection, or where any of your cats were caught.
         </Text>
       </Card>

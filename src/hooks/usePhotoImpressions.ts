@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 
 import { photoApi } from '../api/endpoints';
 import { FEED_CONFIG } from '../constants/game';
+import { isPlaceholderId } from '../constants/placeholders';
 
 /**
  * Reports which photos the player actually looked at.
@@ -48,6 +49,9 @@ export function usePhotoImpressions() {
       let added = false;
 
       for (const id of photoIds) {
+        // A design placeholder was never a photograph, so nobody saw one. Dropped here
+        // rather than filtered at the flush so it never occupies a slot in the batch.
+        if (isPlaceholderId(id)) continue;
         if (reported.current.has(id) || pending.current.has(id)) continue;
         pending.current.add(id);
         added = true;

@@ -17,7 +17,6 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { StatusBar } from 'expo-status-bar';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
@@ -39,17 +38,30 @@ import { ConfirmSheet } from '../../components/BottomSheet';
 import { IdentifySheet } from '../../components/IdentifySheet';
 import { EmptyState } from '../../components/EmptyState';
 import { ScoreBreakdown } from '../../components/ScoreBreakdown';
-import { Screen, SectionHeader } from '../../components/Screen';
+import { Screen, SectionHeader, useStatusBarStyle } from '../../components/Screen';
 import { SkeletonBlock } from '../../components/Skeleton';
 import { TextField } from '../../components/TextField';
 import { showToast } from '../../components/Toast';
-import { VoteRow } from '../../components/VoteButton';
-import type { CatCandidate, IdentifyChoice, Photo, Quotas, Reaction } from '../../models';
+import { Avatar } from '../../components/Avatar';
+import { ReactionBar } from '../../components/ReactionBar';
+import type {
+  CatCandidate,
+  IdentifyChoice,
+  PhotoDetail,
+  Quotas,
+  Reaction,
+} from '../../models';
+import {
+  isPlaceholderId,
+  placeholderPhotoById,
+} from '../../constants/placeholders';
 import { useAlbumStore } from '../../store/albumStore';
 import { useAuthStore } from '../../store/authStore';
+import { usePawGift } from '../../hooks/usePawGift';
 import { usePhotoReaction } from '../../hooks/usePhotoReaction';
 import { useReactionStore } from '../../store/reactionStore';
-import { COMMUNITY_CONFIG, communityLabel } from '../../constants/game';
+import { COMMUNITY_CONFIG, PAW_CONFIG, communityLabel } from '../../constants/game';
+import { usePawStore } from '../../store/pawStore';
 import {
   chrome,
   layout,
@@ -57,11 +69,12 @@ import {
   marmalade,
   photoScrim,
   radii,
+  rarity,
   spacing,
   spring,
   text,
 } from '../../theme';
-import { relativeTime } from '../../utils/format';
+import { compactNumber, relativeTime } from '../../utils/format';
 
 /**
  * Photo Detail (README section 5.3).
@@ -93,6 +106,12 @@ type PhotoDetailParams = {
   PhotoDetail: { photoId: string };
   /** Both stacks that mount this screen register a CatProfile of their own. */
   CatProfile: { catId: string };
+  /**
+   * So does every one of them register a PublicProfile — home, map, challenges and profile.
+   * Declared here rather than inherited because this screen is deliberately not typed
+   * against any one stack's param list; see the note above.
+   */
+  PublicProfile: { userId: string };
 };
 
 type Props = NativeStackScreenProps<PhotoDetailParams, 'PhotoDetail'>;
@@ -124,7 +143,7 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
   const cats = useAlbumStore((s) => s.cats);
   const loadCatDex = useAlbumStore((s) => s.loadCatDex);
 
-  const [photo, setPhoto] = useState<Photo | null>(cached ?? null);
+  const [photo, setPhoto] = useState<PhotoDetail | null>(cached ?? null);
   const [missing, setMissing] = useState(false);
   const [caption, setCaptionText] = useState(cached?.caption ?? '');
   const [savingCaption, setSavingCaption] = useState(false);
@@ -322,6 +341,25 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
   }, []);
 
   useEffect(() => {
+    /*
+     * A design placeholder has no row behind it, so there is nothing to fetch.
+     *
+     * Without this the one thing a placeholder feed cannot do is be opened: every tap on a
+     * fake card would 404 into "This photo has moved on", and the half of the design with
+     * the score, the breakdown and the author on it would be unreachable. Read straight out
+     * of `constants/placeholders` instead. Nothing below this line runs.
+     */
+    if (isPlaceholderId(photoId)) {
+      const stand = placeholderPhotoById(photoId);
+      if (stand) {
+        setPhoto({ ...stand, myReaction: useReactionStore.getState().get(stand.id) });
+        setCaptionText(stand.caption ?? '');
+      } else {
+        setMissing(true);
+      }
+      return;
+    }
+
     // Refetch even when cached: reactions and challenge status change server-side, and
     // the cached copy is whatever the album last synced.
     photoApi
@@ -520,6 +558,39 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
    * The out-of-allowance refusal is the other outcome, and it arrives as a thrown error with
    * the server's own message, which is written for a player to read.
    */
+  /**
+   * Whose photograph this is.
+   *
+   * Derived up here rather than after the loading guard, because the reveal path below reads
+   * it — and it now decides more than which controls are drawn: it decides which *currency*
+   * a reveal is paid in. `photo` is null while loading, and a null photo is nobody's.
+   */
+  const isMine = photo !== null && viewerId !== null && photo.ownerId === viewerId;
+
+  /**
+   * The wallet, for the reveal button's label.
+   *
+   * Read here rather than passed down because the button is the only thing on this screen
+   * that spends, and threading a balance through the whole render for one label would be
+   * more machinery than the fact is worth.
+   */
+  const pawWallet = usePawStore((s) => s.wallet);
+
+  /**
+   * Whether revealing this photograph costs paws rather than a free score.
+   *
+   * Two ways to end up here and they are deliberately the same branch, because the server
+   * makes the same decision in `fundingFor`:
+   *
+   *   - it is **not yours** — the free allowance is for your own album, always, which is what
+   *     stops a reveal on a stranger's photo silently spending a score you were saving;
+   *   - it is yours and the allowance is **gone**.
+   *
+   * `quotas.remaining === null` is Pro, which is unlimited and therefore never pays paws for
+   * its own work. It still pays for somebody else's, because that is not what Pro bought.
+   */
+  const payWithPaws = !isMine || (quotas?.remaining !== null && (quotas?.remaining ?? 0) <= 0);
+
   const revealScore = useCallback(async () => {
     if (!photo) return;
 
@@ -527,9 +598,21 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
     try {
       const result = await photoApi.reveal(photo.id);
 
-      await upsertPhoto(result.photo);
+      /*
+       * Only your own photographs go into the album store.
+       *
+       * Revealing somebody else's is now a thing a player can pay to do, and the reply carries
+       * their photograph — writing it here would file a stranger's picture into this device's
+       * album cache, where the grid and the "1 of 200" count would both start counting it.
+       */
+      if (isMine) await upsertPhoto(result.photo);
+
       setPhoto(result.photo);
       setQuotas((current) => (current ? { ...current, ...result.allowance } : current));
+
+      // A paw-funded reveal moved the wallet and the reply does not carry it, so the balance
+      // is re-read rather than guessed. Cheap, and this is not a per-scroll action.
+      if (payWithPaws) void usePawStore.getState().refresh();
 
       if (result.scored) {
         showToast(`Scored ${result.photo.scores.total}.`, 'success');
@@ -547,7 +630,7 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
     } finally {
       setRevealing(false);
     }
-  }, [photo, upsertPhoto]);
+  }, [isMine, payWithPaws, photo, upsertPhoto]);
 
   const confirmDelete = useCallback(async () => {
     if (!photo) return;
@@ -569,13 +652,14 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
    * to drift.
    */
   const patchPhoto = useCallback(
-    (photoId: string, apply: (p: Photo) => Photo) => {
+    (photoId: string, apply: (p: PhotoDetail) => PhotoDetail) => {
       setPhoto((current) => (current && current.id === photoId ? apply(current) : current));
     },
     []
   );
 
   const reactTo = usePhotoReaction(patchPhoto);
+  const givePawTo = usePawGift(patchPhoto);
 
   const react = useCallback(
     (reaction: Reaction) => {
@@ -596,6 +680,14 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
       showToast('We could not open the share sheet.', 'error');
     }
   }, [photo]);
+
+  /*
+   * The loaded screen is a photograph running under the notch, so the clock inverts to stay
+   * readable. The missing and loading states below are ordinary paper screens, and they get
+   * the paper style from here rather than from `Screen` — a parent's effect runs after its
+   * child's, so this component has the last word either way and has to say the right thing.
+   */
+  useStatusBarStyle(!photo || missing ? 'dark' : 'light');
 
   if (missing) {
     return (
@@ -621,14 +713,11 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
     );
   }
 
-  const isMine = viewerId !== null && photo.ownerId === viewerId;
   /** The one field that says whether `scores`, `tier` and `badges` mean anything. */
   const scored = photo.scoredAt !== null;
 
   return (
     <View style={styles.root}>
-      {/* The hero runs under the notch, so the clock has to invert to stay readable. */}
-      <StatusBar style="light" />
 
       {/*
         The photograph, fixed and full screen, behind everything else.
@@ -743,11 +832,53 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
             copy told the player to "open it from your album to reveal the score", and there
             was no control here to do it with. Both halves of that are below.
           */}
+          {/*
+            Whose photograph this is, above the number.
+
+            Present exactly when the reader is not the owner — `GET /photos/:id` sends the
+            feed card to everyone else, and that is the serialization carrying an author. It
+            leads the sheet because a photo reached from the feed raises "who took this"
+            before it raises "what did it score", and until now the answer was nowhere on
+            the screen: the only route to a photographer's other work was to go back to the
+            feed and find another of their cards.
+          */}
+          {photo.author && !isMine ? (
+            <Pressable
+              onPress={() =>
+                navigation.navigate('PublicProfile', { userId: photo.author!.id })
+              }
+              accessibilityRole="button"
+              accessibilityLabel={`${photo.author.username}'s profile`}
+              style={styles.authorRow}
+            >
+              <Avatar
+                uri={photo.author.avatarUrl}
+                name={photo.author.username}
+                size={30}
+              />
+              <Text style={[text.h3, styles.authorName]} numberOfLines={1}>
+                {photo.author.username}
+              </Text>
+              <CaretRight size={14} weight="bold" color={paper.textFaint} />
+            </Pressable>
+          ) : null}
+
           {scored ? (
             <>
+              {/*
+                The score and the tier, and no denominator.
+
+                "/ 100 overall" was answering a question nobody asks — the scale is the same
+                on every photograph in the product, so restating it on each one spends a line
+                to say nothing. The tier is what the number actually means, it is the word
+                the rest of the app ranks and filters by, and it is the half a player repeats
+                out loud. So: "57 Common", which is how they would say it.
+              */}
               <View style={styles.scoreRow}>
                 <Text style={[text.statLg, { color: paper.text }]}>{photo.scores.total}</Text>
-                <Text style={[text.caption, styles.scoreOutOf]}>/ 100 overall</Text>
+                <Text style={[text.h2, { color: rarity[photo.tier].base }]}>
+                  {photo.tier}
+                </Text>
               </View>
 
               <ScoreBreakdown
@@ -758,6 +889,37 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
                 showTotal={false}
                 style={styles.breakdown}
               />
+
+              {/*
+                Who paid for this score, when it was not the photographer.
+
+                Under the breakdown rather than over it, and set in caption type: the number is
+                what the screen is about and the credit is a footnote to it. It is drawn only
+                when the server sends one — `revealedBy` is null for a photographer's own
+                reveal, so this never says "Unlocked by you" and never appears on the thousands
+                of photographs nobody else paid for.
+
+                Pressable, because a credit that names somebody and cannot be followed is a
+                dead end — and the person who spent paws on your photograph is exactly the
+                person you might want to look at.
+              */}
+              {photo.revealedBy ? (
+                <Pressable
+                  onPress={() =>
+                    navigation.navigate('PublicProfile', { userId: photo.revealedBy!.id })
+                  }
+                  accessibilityRole="button"
+                  accessibilityLabel={`Score unlocked by ${photo.revealedBy.username}. Opens their profile.`}
+                  style={styles.revealCredit}
+                >
+                  <Text style={[text.caption, { color: paper.textFaint }]}>
+                    Unlocked by{' '}
+                    <Text style={[text.caption, { color: marmalade[600] }]}>
+                      {photo.revealedBy.username}
+                    </Text>
+                  </Text>
+                </Pressable>
+              ) : null}
             </>
           ) : (
             <View style={styles.unscored}>
@@ -767,24 +929,54 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
               </View>
 
               <Text style={[text.body, { color: paper.textMuted }]}>
-                {revealHint(quotas)}
+                {isMine
+                  ? revealHint(quotas)
+                  : `The photographer has not revealed this score yet. You can have it judged for ${PAW_CONFIG.revealCost} paws — the score goes to them, and to everyone.`}
               </Text>
 
               {/*
-                Offered whatever the allowance says, and refused by the server rather than
-                by a disabled button. The client's copy of the allowance is a snapshot that
-                goes stale the moment the rolling window turns over — greying this out would
-                mean a player whose slot freed up two minutes ago is told they have none,
-                by a screen that has not asked since.
+                Offered whatever the allowance and the wallet say, and refused by the server
+                rather than by a disabled button. Both of this device's numbers are snapshots:
+                the allowance turns over on a rolling window, and the wallet moves whenever
+                somebody else gives this player a paw. Greying the button out would mean a
+                player who was paw'd thirty seconds ago is told they cannot afford something
+                they can, by a screen that has not asked since.
+
+                It is now offered on **somebody else's** photograph too, which it never used to
+                be. The old note said a reveal there would spend *your allowance* on *their*
+                row — that is still true and is still refused. What changed is that paws can
+                pay for it instead, and the allowance is not consulted on that branch at all.
               */}
               <Button
-                label="Reveal the score"
+                label={
+                  payWithPaws
+                    ? `Reveal for ${PAW_CONFIG.revealCost} 🐾`
+                    : 'Reveal the score'
+                }
                 onPress={() => void revealScore()}
                 loading={revealing}
                 disabled={revealing}
                 fullWidth
-                accessibilityHint="Uses one of your scores to have this photo judged"
+                accessibilityHint={
+                  payWithPaws
+                    ? `Spends ${PAW_CONFIG.revealCost} paws from your wallet to have this photo judged`
+                    : 'Uses one of your free scores to have this photo judged'
+                }
               />
+
+              {/*
+                Said once, under the button, and only when paws are what is being spent.
+
+                The free path needs no explanation — `revealHint` above has already said how
+                many scores are left. This line exists because spending currency on a tap
+                should never be a surprise, and because "from your wallet" is the second half
+                of the lesson the gift toast starts.
+              */}
+              {payWithPaws ? (
+                <Text style={[text.caption, { color: paper.textFaint }]}>
+                  {`From your wallet — ${compactNumber(pawWallet)} paw${pawWallet === 1 ? '' : 's'} left. Your free scores are for your own photos.`}
+                </Text>
+              ) : null}
             </View>
           )}
 
@@ -794,10 +986,13 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
             and carries no viewer. Reading it from one place is what stops the button and
             the feed disagreeing after a round trip.
           */}
-          <VoteRow
+          <ReactionBar
+            photoId={photo.id}
             reactions={photo.reactions}
             myReaction={myReactions[photo.id] ?? null}
             onReact={react}
+            pawCount={photo.pawCount}
+            onGivePaw={() => givePawTo(photo)}
             disabled={isMine}
             size="lg"
             style={styles.votes}
@@ -824,8 +1019,14 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
             An unidentified photograph used to render the Dex row anyway, with an empty
             `catNickname` — so it read "'s Dex" and led to a cat profile for the empty string.
             Nothing in the app called `identify`, so that was every photograph in the album.
+
+            Hidden entirely on somebody else's photograph, and for the same reason. A Dex is
+            one player's private record: `catNickname` is the *reader's* name for the cat, so
+            on a stranger's photo it is always empty and this drew the exact "'s Dex" bug
+            described above. Identifying it would be worse still — it would file another
+            player's photograph into your Dex.
           */}
-          {photo.catId ? (
+          {!isMine ? null : photo.catId ? (
             <Pressable
               onPress={() => navigation.navigate('CatProfile', { catId: photo.catId })}
               accessibilityRole="button"
@@ -936,110 +1137,149 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
             )}
           </Card>
 
-          <SectionHeader title="Caption" />
-          <TextField
-            label="Caption"
-            value={caption}
-            onChangeText={setCaptionText}
-            placeholder="Say something about this one"
-            maxLength={140}
-            multiline
-          />
-          {caption.trim() !== (photo.caption ?? '') ? (
-            <Button
-              label="Save caption"
-              variant="secondary"
-              onPress={() => void saveCaption()}
-              loading={savingCaption}
-              style={styles.saveCaption}
-            />
-          ) : null}
-
-          <SectionHeader
-            title="Sharing"
-            /*
-              "Not in the feed" rather than "not visible to anyone".
-
-              Photos live in a public storage bucket at an unguessable address: nothing
-              lists them, nothing links them, and the path cannot be walked — but a URL
-              that escaped would still open. The toggle below controls discoverability,
-              which is what it has always actually controlled, so that is what it says.
-            */
-            description="Your album stays out of the feed. Nothing here is shown to other players until you share it."
-          />
-
-          <DividedGroup>
-            <ToggleRow
-              label="Show in the community feed"
-              hint="Other players can see and react to this photo."
-              value={photo.sharedToFeed}
-              onChange={() => void toggleShared()}
-            />
-            <ToggleRow
-              label="Pin to my public profile"
-              hint="Appears in your showcase, up to six photos."
-              value={photo.showcased}
-              onChange={() => void toggleShowcased()}
-            />
-            {/*
-              The one switch here that starts on, and the hint says what turning it off
-              does and does not do. "Off the map" is a promise about other players, not
-              about the record: the coordinates stay so the Cat Dex can still recognise
-              this cat next time, which is a thing a player would reasonably assume the
-              switch also erased.
-            */}
-            <ToggleRow
-              label="Show as a pin on the map"
-              hint="Other players see roughly where this cat was — never the exact spot. Turning this off removes the pin; the photo keeps its location for Cat Dex matching."
-              value={photo.sharedToMap}
-              onChange={() => void toggleSharedToMap()}
-            />
-          </DividedGroup>
-
           {/*
-            The Dex gets its own section and its own paragraph because it is the one
-            control here whose effect is somewhere else in the app. "Save to Dex" on the
-            reveal screen is this same switch, and a player who pressed it there and
-            wondered what moved should find the answer written out here.
+            The caption is editable by exactly one person and readable by everyone.
 
-            Hidden entirely until the photograph has a cat. A card belongs to an animal, and
-            with no `catId` this drew "Use as 's Dex photo" and would have pinned against an
-            empty id. Declining to identify is a supported answer now, so this is a state
-            that will really happen rather than one that only existed before the sheet did.
+            A stranger gets the words without the field: an editor on somebody else's photo
+            offered to rewrite their caption, and the PATCH behind it is owner-only, so the
+            only possible outcome of using it was a 404 over a change the player had already
+            watched themselves type.
           */}
-          {photo.catId ? (
+          {isMine ? (
             <>
-          <SectionHeader
-            title="Cat Dex"
-            description={`Your Dex keeps one card per cat. The card shows your highest-scoring photo of that cat unless you choose a different one — it does not change the cat's score, tier or Dex entry, only the picture on the card.`}
-          />
-
-          <DividedGroup>
-            <ToggleRow
-              label={`Use as ${photo.catNickname}'s Dex photo`}
-              hint={
-                isDexPhoto
-                  ? `${photo.catNickname}'s card shows this photo because you chose it.`
-                  : dexEntry?.bestPhotoId === photo.id
-                    ? `This is already on the card as your best shot of ${photo.catNickname}. Turn this on to keep it there even after a higher score.`
-                    : `The card currently shows your highest-scoring shot of ${photo.catNickname}.`
-              }
-              value={isDexPhoto}
-              disabled={pinningDex}
-              onChange={() => void toggleDexPhoto()}
-            />
-          </DividedGroup>
+              <SectionHeader title="Caption" />
+              <TextField
+                label="Caption"
+                value={caption}
+                onChangeText={setCaptionText}
+                placeholder="Say something about this one"
+                maxLength={140}
+                multiline
+              />
+              {caption.trim() !== (photo.caption ?? '') ? (
+                <Button
+                  label="Save caption"
+                  variant="secondary"
+                  onPress={() => void saveCaption()}
+                  loading={savingCaption}
+                  style={styles.saveCaption}
+                />
+              ) : null}
+            </>
+          ) : photo.caption ? (
+            <>
+              <SectionHeader title="Caption" />
+              <Text style={[text.body, { color: paper.textMuted }]}>{photo.caption}</Text>
             </>
           ) : null}
 
+          {/*
+            Everything from here down changes the photograph, so none of it is drawn unless
+            the photograph is yours.
+
+            All three of these toggles, the Dex pin and the delete below PATCH or DELETE an
+            owner-only route. Rendering them for a reader who cannot use them offered a set
+            of switches whose only possible response was an error — and "Delete photo" sitting
+            under a stranger's picture reads as a claim about what this screen can do, which
+            is the one thing a destructive control must never get wrong.
+          */}
+          {isMine ? (
+            <>
+            <SectionHeader
+              title="Sharing"
+              /*
+                "Not in the feed" rather than "not visible to anyone".
+
+                Photos live in a public storage bucket at an unguessable address: nothing
+                lists them, nothing links them, and the path cannot be walked — but a URL
+                that escaped would still open. The toggle below controls discoverability,
+                which is what it has always actually controlled, so that is what it says.
+              */
+              description="Your album stays out of the feed. Nothing here is shown to other players until you share it."
+            />
+
+            <DividedGroup>
+              <ToggleRow
+                label="Show in the community feed"
+                hint="Other players can see and react to this photo."
+                value={photo.sharedToFeed}
+                onChange={() => void toggleShared()}
+              />
+              <ToggleRow
+                label="Pin to my public profile"
+                hint="Appears in your showcase, up to six photos."
+                value={photo.showcased}
+                onChange={() => void toggleShowcased()}
+              />
+              {/*
+                The one switch here that starts on, and the hint says what turning it off
+                does and does not do. "Off the map" is a promise about other players, not
+                about the record: the coordinates stay so the Cat Dex can still recognise
+                this cat next time, which is a thing a player would reasonably assume the
+                switch also erased.
+              */}
+              <ToggleRow
+                label="Show as a pin on the map"
+                hint="Other players see roughly where this cat was — never the exact spot. Turning this off removes the pin; the photo keeps its location for Cat Dex matching."
+                value={photo.sharedToMap}
+                onChange={() => void toggleSharedToMap()}
+              />
+            </DividedGroup>
+
+            {/*
+              The Dex gets its own section and its own paragraph because it is the one
+              control here whose effect is somewhere else in the app. "Save to Dex" on the
+              reveal screen is this same switch, and a player who pressed it there and
+              wondered what moved should find the answer written out here.
+
+              Hidden entirely until the photograph has a cat. A card belongs to an animal, and
+              with no `catId` this drew "Use as 's Dex photo" and would have pinned against an
+              empty id. Declining to identify is a supported answer now, so this is a state
+              that will really happen rather than one that only existed before the sheet did.
+            */}
+            {photo.catId ? (
+              <>
+            <SectionHeader
+              title="Cat Dex"
+              description={`Your Dex keeps one card per cat. The card shows your highest-scoring photo of that cat unless you choose a different one — it does not change the cat's score, tier or Dex entry, only the picture on the card.`}
+            />
+
+            <DividedGroup>
+              <ToggleRow
+                label={`Use as ${photo.catNickname}'s Dex photo`}
+                hint={
+                  isDexPhoto
+                    ? `${photo.catNickname}'s card shows this photo because you chose it.`
+                    : dexEntry?.bestPhotoId === photo.id
+                      ? `This is already on the card as your best shot of ${photo.catNickname}. Turn this on to keep it there even after a higher score.`
+                      : `The card currently shows your highest-scoring shot of ${photo.catNickname}.`
+                }
+                value={isDexPhoto}
+                disabled={pinningDex}
+                onChange={() => void toggleDexPhoto()}
+              />
+            </DividedGroup>
+              </>
+            ) : null}
+
+            </>
+          ) : null}
+
+          {/*
+            Sharing the link is not an owner's privilege — this opens the OS share sheet on a
+            photograph that is already published to the feed, which is the same act as sending
+            somebody a link to it. Deleting is, and it is the half that is gated.
+          */}
           <View style={styles.actions}>
             <Button label="Share this shot" onPress={() => void share()} trailingIcon />
-            <Button
-              label="Delete photo"
-              variant="ghost"
-              destructive
-              onPress={() => setConfirmingDelete(true)}
-            />
+            {isMine ? (
+              <Button
+                label="Delete photo"
+                variant="ghost"
+                destructive
+                onPress={() => setConfirmingDelete(true)}
+              />
+            ) : null}
           </View>
         </Animated.ScrollView>
         </GestureDetector>
@@ -1079,7 +1319,8 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
         onConfirm={() => void confirmDelete()}
         title="Delete this photo?"
         body="This cannot be undone. If it is your best shot of this cat, your next-best takes its place in the Cat Dex."
-        confirmLabel={deleting ? 'Deleting' : 'Delete'}
+        confirmLabel="Delete"
+        busy={deleting}
         destructive
       />
 
@@ -1310,10 +1551,29 @@ const styles = StyleSheet.create({
   scoreRow: {
     flexDirection: 'row',
     alignItems: 'baseline',
-    gap: 6,
+    gap: spacing.xs,
   },
-  scoreOutOf: {
-    color: paper.textFaint,
+  /** The way to the photographer, directly above their score. */
+  authorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginBottom: spacing.sm,
+    minHeight: 44,
+  },
+  authorName: {
+    flex: 1,
+    color: paper.text,
+  },
+  /**
+   * A footnote, spaced off the breakdown above it rather than boxed.
+   *
+   * It is one line of caption type and it is the only thing on this screen about a person
+   * rather than about the photograph, so it gets air instead of a container — a card around it
+   * would give it the weight of a section.
+   */
+  revealCredit: {
+    marginTop: spacing.sm,
   },
   breakdown: {
     marginTop: spacing.sm,

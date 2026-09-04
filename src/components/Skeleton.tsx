@@ -19,6 +19,7 @@ import {
   useReduceMotion,
   type ContextName,
 } from '../theme';
+import { GRID_META_HEIGHT } from './PhotoCard';
 
 /**
  * Skeleton loaders.
@@ -189,7 +190,12 @@ const styles = StyleSheet.create({
     height: undefined,
     borderRadius: 0,
   },
+  /**
+   * The same fixed block a real grid tile carries, so the album does not jump as photos
+   * land. See `GRID_META_HEIGHT` in PhotoCard for what the number is made of.
+   */
   cardMeta: {
+    height: GRID_META_HEIGHT + spacing.xs + spacing.xs + 2,
     paddingHorizontal: spacing.xs + 2,
     paddingTop: spacing.xs,
     paddingBottom: spacing.xs + 2,

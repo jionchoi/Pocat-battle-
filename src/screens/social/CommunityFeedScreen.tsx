@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { FlatList, StyleSheet, Text, View } from 'react-native';
+import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { UserPlus, UsersThree } from 'phosphor-react-native';
+import type { CompositeScreenProps } from '@react-navigation/native';
+import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { feedApi, photoApi } from '../../api/endpoints';
@@ -12,14 +14,15 @@ import { pawRefreshControl } from '../../components/PawRefresh';
 import { Screen, ScreenHeader } from '../../components/Screen';
 import { PhotoCardSkeleton } from '../../components/Skeleton';
 import { showToast } from '../../components/Toast';
-import { VoteRow } from '../../components/VoteButton';
+import { usePawGift } from '../../hooks/usePawGift';
+import { ReactionBar } from '../../components/ReactionBar';
 import { FEED_CONFIG } from '../../constants/game';
 import { usePhotoImpressions } from '../../hooks/usePhotoImpressions';
 import type { PhotoWithAuthor, Reaction } from '../../models';
 import { useAuthStore } from '../../store/authStore';
 import { useReactionStore } from '../../store/reactionStore';
 import { paper, layout, spacing, text } from '../../theme';
-import type { ChallengesStackParamList } from '../../navigation/types';
+import type { ChallengesStackParamList, MainTabParamList } from '../../navigation/types';
 import { FilterChips } from '../album/FilterChips';
 import { relativeTime } from '../../utils/format';
 
@@ -31,7 +34,17 @@ import { relativeTime } from '../../utils/format';
  * where it goes and for how long it stays visible.
  */
 
-type Props = NativeStackScreenProps<ChallengesStackParamList, 'CommunityFeed'>;
+/**
+ * Composite, so the screen can leave its own stack.
+ *
+ * Tapping your own name on this feed should open your profile, and your profile is a tab
+ * rather than a route in this stack — see `openAuthor`. Without the tab navigator's props
+ * mixed in, `navigate('ProfileTab', ...)` is a type error and a runtime guess.
+ */
+type Props = CompositeScreenProps<
+  NativeStackScreenProps<ChallengesStackParamList, 'CommunityFeed'>,
+  BottomTabScreenProps<MainTabParamList>
+>;
 
 const SCOPES = ['Everyone', 'Friends'] as const;
 
@@ -116,6 +129,25 @@ export function CommunityFeedScreen({ navigation }: Props) {
     }
   }, [cursor, loadingMore, scope]);
 
+  /**
+   * The patcher `usePawGift` needs: find the photo, apply the updater, leave the rest alone.
+   *
+   * Reactions above still hand-roll their own optimistic update, which predates the shared
+   * hook. Paws do not repeat that — a second hand-written optimistic update over *currency*
+   * is a second place for a balance to drift, and this list is the only thing here that has
+   * to be told where a photo lives.
+   */
+  const patchPhoto = useCallback(
+    (photoId: string, apply: (photo: PhotoWithAuthor) => PhotoWithAuthor) => {
+      setPhotos((current) =>
+        current.map((photo) => (photo.id === photoId ? apply(photo) : photo))
+      );
+    },
+    []
+  );
+
+  const givePaw = usePawGift(patchPhoto);
+
   const react = useCallback(async (photoId: string, reaction: Reaction) => {
     const previous = photos;
 
@@ -152,10 +184,45 @@ export function CommunityFeedScreen({ navigation }: Props) {
     }
   }, [photos]);
 
+  /**
+   * The author strip, which is now the way to a profile.
+   *
+   * Your own name goes to the Profile *tab* rather than to `PublicProfile` with your own id.
+   * They are not the same screen: the public one is the read-only view a stranger gets, so
+   * following your own name into it would show you a version of yourself with no settings, no
+   * album and nothing to edit — and leave it sitting on top of a stack it does not belong in.
+   */
+  const openAuthor = useCallback(
+    (photo: PhotoWithAuthor) => {
+      if (photo.author.id === myId) {
+        navigation.navigate('ProfileTab', { screen: 'Profile' });
+        return;
+      }
+      navigation.navigate('PublicProfile', { userId: photo.author.id });
+    },
+    [myId, navigation]
+  );
+
   const renderItem = useCallback(
     ({ item, index }: { item: PhotoWithAuthor; index: number }) => (
       <View style={styles.entry}>
-        <View style={styles.authorRow}>
+        {/*
+          Pressable as one strip — avatar, name and timestamp together.
+
+          The whole row is the target rather than the name alone: a 30pt avatar beside a line
+          of caption text is two small targets where the player sees one object, and the row
+          is already the shape of the thing being tapped.
+        */}
+        <Pressable
+          style={styles.authorRow}
+          onPress={() => openAuthor(item)}
+          accessibilityRole="button"
+          accessibilityLabel={
+            item.author.id === myId
+              ? 'Open your profile'
+              : `Open ${item.author.username}'s profile`
+          }
+        >
           <Avatar
             uri={item.author.avatarUrl}
             name={item.author.username}
@@ -170,18 +237,30 @@ export function CommunityFeedScreen({ navigation }: Props) {
               {relativeTime(item.capturedAt)}
             </Text>
           </View>
-        </View>
+        </Pressable>
 
         <PhotoCard
           photo={item}
           variant="feed"
           index={index}
-          onPress={() => navigation.navigate('PublicProfile', { userId: item.author.id })}
+          /*
+           * The photograph opens the photograph.
+           *
+           * It used to open the author's profile, which meant the one thing on the card you
+           * could not reach by tapping was the picture — and the trending rail, which is the
+           * same content in a different shape, has opened `PhotoDetail` all along. The two
+           * feeds now behave the same way, and the profile moved to the author strip above,
+           * where a name and a face are what is being pressed.
+           */
+          onPress={() => navigation.navigate('PhotoDetail', { photoId: item.id })}
           footer={
-            <VoteRow
+            <ReactionBar
+              photoId={item.id}
               reactions={item.reactions}
               myReaction={item.myReaction}
               onReact={(reaction) => void react(item.id, reaction)}
+              pawCount={item.pawCount}
+              onGivePaw={() => givePaw(item)}
               disabled={item.ownerId === myId}
               style={styles.votes}
             />
@@ -189,7 +268,7 @@ export function CommunityFeedScreen({ navigation }: Props) {
         />
       </View>
     ),
-    [myId, navigation, react]
+    [givePaw, myId, navigation, openAuthor, react]
   );
 
   return (
@@ -221,6 +300,7 @@ export function CommunityFeedScreen({ navigation }: Props) {
           options={SCOPES}
           selected={scope === 'friends' ? 'Friends' : 'Everyone'}
           onSelect={(value) => setScope(value === 'Friends' ? 'friends' : 'everyone')}
+          style={styles.filters}
         />
 
         {error ? (
@@ -274,6 +354,17 @@ const styles = StyleSheet.create({
   header: {
     paddingHorizontal: layout.gutter,
     gap: spacing.sm,
+  },
+  /**
+   * Breathing room around the scope chips, matching the album grid's.
+   *
+   * The header's `gap` spaces the chips from the title above and stops there, so the rail sat
+   * hard against the first card — which reads as a header for that one photograph rather than
+   * as a control over the whole feed.
+   */
+  filters: {
+    marginTop: spacing.xxs,
+    marginBottom: spacing.sm,
   },
   list: {
     paddingHorizontal: layout.gutter,

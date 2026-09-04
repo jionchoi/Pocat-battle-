@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Clock, Lock, SealCheck, X } from 'phosphor-react-native';
 import Animated, {
   Easing,
@@ -272,10 +273,17 @@ export const SightingStories = React.memo(function SightingStories({
 
         {/* Two stacked washes rather than one flat panel — same construction as the feed's
             poster cards, so text on a photograph is legible the same way everywhere. */}
-        <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-          <View style={[styles.scrimUpper, { backgroundColor: photoScrim.posterTop }]} />
-          <View style={[styles.scrimLower, { backgroundColor: photoScrim.posterBottom }]} />
-        </View>
+        {/*
+          The same ramp the poster cards use, and for the same reason it was rebuilt there:
+          two bottom-anchored blocks of flat colour drew a black box over the lower half of
+          the photograph rather than a fall-off. See `Scrim` in `ViralCard`.
+        */}
+        <LinearGradient
+          pointerEvents="none"
+          colors={['rgba(0, 0, 0, 0)', photoScrim.posterTop, photoScrim.posterBottom]}
+          locations={[0.45, 0.72, 1]}
+          style={StyleSheet.absoluteFill}
+        />
 
         {many ? (
           <>
@@ -347,7 +355,12 @@ export const SightingStories = React.memo(function SightingStories({
               <Clock size={13} weight="bold" color={chrome.text} />
             )}
             <Text style={[text.eyebrow, styles.eyebrow]}>
-              {sighting.verified ? 'Verified sighting' : 'Single report'}
+              {/*
+                Not "Verified". Nobody verified anything — the flag is set from whether there
+                is a photograph behind the pin, and calling that "verified" implied a review
+                that does not exist anywhere in the product. See the note in `MapPin`.
+              */}
+              {sighting.verified ? 'Photographed here' : 'Reported, no photo'}
             </Text>
             {many ? (
               <Text style={[text.eyebrow, styles.counter]}>
@@ -470,21 +483,6 @@ const styles = StyleSheet.create({
     borderRadius: radii.xxl,
     overflow: 'hidden',
     backgroundColor: paper.sunken,
-  },
-  /** Bottom-anchored, like the poster cards in the feed. */
-  scrimUpper: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: '55%',
-  },
-  scrimLower: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: '30%',
   },
   zones: {
     flex: 1,

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -28,14 +28,39 @@ import {
  * Success copy carries no exclamation mark and errors are never "Oops" — the toast states
  * what happened. Anything the player must act on gets an inline error instead, because a
  * toast that disappears is not somewhere to put a decision.
+ *
+ * ## The one exception: an action
+ *
+ * A toast may carry a single action, and it is a **way onward**, never a way back. Its one
+ * caller is the out-of-paws toast, which routes to the shop: the player has hit a wall, and
+ * naming the wall without naming the door is the kind of dead end a toast is otherwise good
+ * at producing.
+ *
+ * It is deliberately not an undo. Paws cannot be taken back — see `usePawGift` — and any
+ * future action here should meet the same bar: it must be optional, and missing it must cost
+ * the player nothing. A toast disappears, so anything a player *must* do belongs in an inline
+ * error or a sheet, and anything they cannot afford to miss belongs nowhere near one.
  */
 
 export type ToastTone = 'success' | 'error' | 'neutral';
+
+export interface ToastAction {
+  label: string;
+  onPress: () => void;
+}
+
+export interface ToastOptions {
+  action?: ToastAction;
+  /** Overrides the default dwell. Anything carrying an action needs longer to be read. */
+  durationMs?: number;
+}
 
 interface ToastItem {
   id: number;
   message: string;
   tone: ToastTone;
+  action?: ToastAction;
+  durationMs?: number;
 }
 
 type Listener = (item: ToastItem) => void;
@@ -43,9 +68,22 @@ type Listener = (item: ToastItem) => void;
 let listener: Listener | null = null;
 let nextId = 1;
 
+/** How long a toast with nothing to press stays up. */
+const DEFAULT_DURATION = 3_200;
+
 /** Imperative, because a catch result or a failed save can fire from anywhere. */
-export function showToast(message: string, tone: ToastTone = 'neutral'): void {
-  listener?.({ id: nextId++, message, tone });
+export function showToast(
+  message: string,
+  tone: ToastTone = 'neutral',
+  options: ToastOptions = {}
+): void {
+  listener?.({
+    id: nextId++,
+    message,
+    tone,
+    action: options.action,
+    durationMs: options.durationMs,
+  });
 }
 
 export function ToastHost() {
@@ -81,9 +119,20 @@ export function ToastHost() {
 
     progress.value = reduceMotion ? 1 : withSpring(1, spring.overshoot);
 
-    const timer = setTimeout(hide, 3200);
+    const timer = setTimeout(hide, item.durationMs ?? DEFAULT_DURATION);
     return () => clearTimeout(timer);
   }, [hide, item, progress, reduceMotion]);
+
+  /**
+   * The action fires and the toast goes, in that order.
+   *
+   * Dismissing first would leave the caller's handler running with nothing on screen saying
+   * it was asked for, and an undo that appears to do nothing is worse than no undo.
+   */
+  const act = useCallback(() => {
+    item?.action?.onPress();
+    hide();
+  }, [hide, item]);
 
   const animated = useAnimatedStyle(() => ({
     opacity: progress.value,
@@ -103,7 +152,12 @@ export function ToastHost() {
 
   return (
     <Animated.View
-      pointerEvents="none"
+      /*
+        `box-none` while there is something to press, so the action receives touches and the
+        rest of the toast does not swallow taps meant for the screen underneath it. Without an
+        action this is inert, exactly as it always was.
+      */
+      pointerEvents={item.action ? 'box-none' : 'none'}
       accessibilityLiveRegion="polite"
       accessibilityRole="alert"
       style={[
@@ -114,15 +168,37 @@ export function ToastHost() {
       ]}
     >
       <View
+        pointerEvents={item.action ? 'box-none' : 'none'}
         style={[
           styles.body,
           { backgroundColor: palette.bg },
           innerHighlight('rgba(255,255,255,0.16)'),
         ]}
       >
-        <Text style={[text.bodySm, { color: palette.fg }]} numberOfLines={2}>
+        <Text style={[text.bodySm, styles.message, { color: palette.fg }]} numberOfLines={2}>
           {item.message}
         </Text>
+
+        {/*
+          The separator is drawn rather than written into the message, so the label is a real
+          control and the line still reads as one sentence: "You are out of paws · Shop".
+        */}
+        {item.action ? (
+          <>
+            <Text style={[text.bodySm, { color: palette.fg, opacity: 0.5 }]}>·</Text>
+            <Pressable
+              onPress={act}
+              accessibilityRole="button"
+              accessibilityLabel={item.action.label}
+              hitSlop={spacing.sm}
+              style={styles.action}
+            >
+              <Text style={[text.bodySm, styles.actionLabel, { color: palette.fg }]}>
+                {item.action.label}
+              </Text>
+            </Pressable>
+          </>
+        ) : null}
       </View>
     </Animated.View>
   );
@@ -137,8 +213,26 @@ const styles = StyleSheet.create({
     zIndex: 100,
   },
   body: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
     borderRadius: radii.lg,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
+  },
+  /**
+   * The message takes the room and the action keeps its own.
+   *
+   * `flexShrink` rather than `flex: 1`: a short message should not push the action to the far
+   * edge of the screen, where it is a separate object rather than the end of the sentence.
+   */
+  message: {
+    flexShrink: 1,
+  },
+  action: {
+    paddingVertical: 2,
+  },
+  actionLabel: {
+    textDecorationLine: 'underline',
   },
 });

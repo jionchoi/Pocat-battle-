@@ -16,6 +16,7 @@ import { pawRefreshControl } from '../../components/PawRefresh';
 import { Screen, ScreenHeader } from '../../components/Screen';
 import { PhotoCardSkeleton } from '../../components/Skeleton';
 import { RARITIES } from '../../constants/game';
+import { PLACEHOLDER_CATS, SHOW_PLACEHOLDERS } from '../../constants/placeholders';
 import type { Cat, Rarity } from '../../models';
 import { useAlbumStore } from '../../store/albumStore';
 import { layout, paper, spacing, text } from '../../theme';
@@ -65,7 +66,21 @@ export function CatDexScreen({ navigation }: Props) {
     [cardWidth, navigation]
   );
 
-  const discovered = cats.filter((cat) => cat.discoveredByMe).length;
+  /**
+   * Nine stand-in cats when the Dex is empty, with real photographs on them.
+   *
+   * The Dex is the screen whose whole design question is what a *grid* of these tiles looks
+   * like — how the tier disc reads against a pale coat, whether the encounter counter
+   * survives on a busy crop, whether three across is the right number. None of that can be
+   * answered by the empty state, and none of it by grey rectangles either, which is why the
+   * stand-ins carry pictures. See `constants/placeholders`.
+   *
+   * All or nothing: one real cat and the screen is the player's own Dex.
+   */
+  const placeheld = SHOW_PLACEHOLDERS && cats.length === 0 && phase !== 'loading';
+  const shownCats = placeheld ? PLACEHOLDER_CATS : cats;
+
+  const discovered = shownCats.filter((cat) => cat.discoveredByMe).length;
 
   /**
    * Tier counts, best-first.
@@ -76,12 +91,12 @@ export function CatDexScreen({ navigation }: Props) {
    */
   const byTier = useMemo(() => {
     const counts = { Common: 0, Rare: 0, Epic: 0, Legendary: 0 } as Record<Rarity, number>;
-    for (const cat of cats) counts[cat.bestTier] += 1;
+    for (const cat of shownCats) counts[cat.bestTier] += 1;
     return [...RARITIES].reverse().filter((tier) => counts[tier] > 0).map((tier) => ({
       tier,
       count: counts[tier],
     }));
-  }, [cats]);
+  }, [shownCats]);
 
   if (phase === 'loading') {
     return (
@@ -100,7 +115,8 @@ export function CatDexScreen({ navigation }: Props) {
     );
   }
 
-  if (cats.length === 0) {
+  // Only reachable with placeholders off — `shownCats` is never empty otherwise.
+  if (shownCats.length === 0) {
     return (
       <Screen>
         <ScreenHeader title="Cat Dex" />
@@ -124,7 +140,7 @@ export function CatDexScreen({ navigation }: Props) {
       <View style={styles.header}>
         <ScreenHeader title="Cat Dex" style={styles.title} />
         <Text style={[text.bodySm, styles.subtitle]}>
-          {`${pluralize(cats.length, 'cat')} spotted in your neighbourhood${
+          {`${pluralize(shownCats.length, 'cat')} spotted in your neighbourhood${
             discovered > 0 ? ` · ${discovered} you found first` : ''
           }`}
         </Text>
@@ -152,7 +168,7 @@ export function CatDexScreen({ navigation }: Props) {
       </View>
 
       <FlatList
-        data={cats}
+        data={shownCats}
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
         numColumns={COLUMNS}

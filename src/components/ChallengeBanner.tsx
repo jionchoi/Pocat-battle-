@@ -14,14 +14,14 @@ import {
   CaretRight,
   CheckCircle,
   CloudRain,
-  Diamond,
   Fire,
   Medal,
-  MoonStars,
+  Moon,
+  Sparkle,
   Sun,
   Timer,
   Trophy,
-  UsersThree,
+  Users,
   type IconProps,
 } from 'phosphor-react-native';
 
@@ -70,12 +70,20 @@ import { compactNumber, remainingLabel } from '../utils/format';
 /* Glyphs                                                                     */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Plain weather-app / social-app glyphs, deliberately.
+ *
+ * A moon rather than a moon-with-stars, a sparkle rather than a cut gemstone, two people
+ * rather than three: the specific variants read as decoration at 22pt on a coloured field,
+ * and the challenge's own title is what says which prompt this is. See the same note in
+ * `constants/achievements.ts`.
+ */
 const CHALLENGE_GLYPHS: Record<ChallengeIconKey, React.ComponentType<IconProps>> = {
   rain: CloudRain,
   sun: Sun,
-  night: MoonStars,
-  rarity: Diamond,
-  community: UsersThree,
+  night: Moon,
+  rarity: Sparkle,
+  community: Users,
   trophy: Trophy,
 };
 

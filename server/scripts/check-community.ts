@@ -14,6 +14,7 @@ import {
   MAX_VOTES_PER_DAY,
   MIN_VIEWS_FOR_CONFIDENCE,
   PRIOR_RATIO,
+  REACTIONS,
   SCORE_SCALE,
   communityScore,
   emptyReactions,
@@ -86,11 +87,17 @@ ok('never below zero', communityScore(0, 1_000_000) >= 0);
 
 console.log('\n-- reactions --\n');
 
-check('a fresh tally is all zeroes', emptyReactions(), { laugh: 0, love: 0, wow: 0 });
-ok('laugh is a reaction', isReaction('laugh'));
-ok('love is a reaction', isReaction('love'));
-ok('wow is a reaction', isReaction('wow'));
+check('a fresh tally is all zeroes', emptyReactions(), {
+  love: 0,
+  laugh: 0,
+  wow: 0,
+  melt: 0,
+  fire: 0,
+});
+check('the tally has one slot per reaction', Object.keys(emptyReactions()).length, REACTIONS.length);
+for (const reaction of REACTIONS) ok(`${reaction} is a reaction`, isReaction(reaction));
 ok('an invented reaction is refused', !isReaction('angry'));
+ok('a downvote is not in the set', !isReaction('dislike'));
 ok('a non-string is refused', !isReaction(3));
 
 console.log('\n-- the ranked window --\n');
@@ -128,6 +135,27 @@ for (const [key, ours] of [
   } else {
     check(`client and server agree on ${key}`, Number(match[1]!.replace(/_/g, '')), ours);
   }
+}
+
+/*
+ * The reaction set is mirrored too, and it is the one mirror that can break *silently*.
+ *
+ * A number that drifts shows up as a wrong meter. A reaction the client can send and the
+ * column will not accept shows up as a 500 on somebody's tap, and only for the one face that
+ * drifted, so the tallies stay plausible while a fifth of the reactions fail. Order is
+ * checked as well as membership, because the client draws the tray in list order and the
+ * check is free.
+ */
+const clientReactions = clientSource
+  .match(/REACTIONS: readonly Reaction\[\] = \[([^\]]*)\]/)?.[1]
+  ?.match(/'([a-z]+)'/g)
+  ?.map((quoted) => quoted.slice(1, -1));
+
+if (!clientReactions) {
+  failures += 1;
+  console.log('FAIL  could not find REACTIONS in the client. Has it moved or been renamed?');
+} else {
+  check('client and server agree on the reaction set', clientReactions, [...REACTIONS]);
 }
 
 console.log(`\n${failures === 0 ? 'All checks passed.' : `${failures} check(s) failed.`}\n`);
