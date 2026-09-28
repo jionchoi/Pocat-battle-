@@ -261,7 +261,7 @@ const styles = StyleSheet.create({
     backgroundColor: chrome.fill,
   },
   noPhoto: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
   },

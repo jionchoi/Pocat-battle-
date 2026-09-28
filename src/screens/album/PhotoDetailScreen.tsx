@@ -62,6 +62,7 @@ import { usePhotoReaction } from '../../hooks/usePhotoReaction';
 import { useReactionStore } from '../../store/reactionStore';
 import { COMMUNITY_CONFIG, PAW_CONFIG, communityLabel } from '../../constants/game';
 import { usePawStore } from '../../store/pawStore';
+import { isNoPaws, useShopRoute } from '../../hooks/useShopRoute';
 import {
   chrome,
   layout,
@@ -575,6 +576,7 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
    * more machinery than the fact is worth.
    */
   const pawWallet = usePawStore((s) => s.wallet);
+  const openShop = useShopRoute();
 
   /**
    * Whether revealing this photograph costs paws rather than a free score.
@@ -588,8 +590,16 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
    *
    * `quotas.remaining === null` is Pro, which is unlimited and therefore never pays paws for
    * its own work. It still pays for somebody else's, because that is not what Pro bought.
+   *
+   * **A null `quotas` is "not known yet", not "nothing left".** It is null until the allowance
+   * request lands, and the first version of this line read it as exhausted — so on your own
+   * photograph the button said "Reveal for 3 🐾" for as long as that took, then changed its
+   * mind. Offering to charge for something that turns out to be free is the one direction this
+   * must not fail in, so an unloaded allowance is treated as free and the server has the last
+   * word either way.
    */
-  const payWithPaws = !isMine || (quotas?.remaining !== null && (quotas?.remaining ?? 0) <= 0);
+  const payWithPaws =
+    !isMine || (quotas !== null && quotas.remaining !== null && quotas.remaining <= 0);
 
   const revealScore = useCallback(async () => {
     if (!photo) return;
@@ -623,14 +633,28 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
         );
       }
     } catch (err) {
-      showToast(
-        err instanceof Error ? err.message : 'We could not reach the scorer.',
-        'error'
-      );
+      /*
+       * Refused for want of paws: say what the server said, and offer the shop.
+       *
+       * Neutral rather than error. Nothing broke — the player asked for something they cannot
+       * afford yet, and the fix is a place to go rather than a retry. Every other failure is a
+       * real one and stays red.
+       */
+      if (isNoPaws(err)) {
+        showToast(err.message, 'neutral', {
+          action: { label: 'Shop', onPress: openShop },
+          durationMs: PAW_CONFIG.giftToastMs,
+        });
+      } else {
+        showToast(
+          err instanceof Error ? err.message : 'We could not reach the scorer.',
+          'error'
+        );
+      }
     } finally {
       setRevealing(false);
     }
-  }, [isMine, payWithPaws, photo, upsertPhoto]);
+  }, [isMine, openShop, payWithPaws, photo, upsertPhoto]);
 
   const confirmDelete = useCallback(async () => {
     if (!photo) return;
@@ -1449,7 +1473,7 @@ const styles = StyleSheet.create({
    * should read as the frame the picture sits in, not as the app showing through.
    */
   photoLayer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: chrome.fill,
   },
   /**
@@ -1586,7 +1610,7 @@ const styles = StyleSheet.create({
     color: paper.textFaint,
   },
   noPhoto: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -573,7 +573,7 @@ const styles = StyleSheet.create({
     textShadowRadius: 7,
   },
   lockedBadge: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
   },

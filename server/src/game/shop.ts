@@ -84,8 +84,6 @@ export interface Entitlements {
    * revoked if a rank ever fell. See the migration.
    */
   unlockedIds: readonly string[];
-  /** The wallet, for deciding whether a paw price is affordable. Never the grant. */
-  walletBalance: number;
 }
 
 /**
@@ -284,7 +282,19 @@ export type UnlockRefusal =
 
 export function unlockRefusal(
   entry: CatalogEntry | undefined,
-  who: Entitlements
+  who: Entitlements,
+  /**
+   * The **wallet** balance, and a separate argument rather than a field on `who`.
+   *
+   * Ownership and affordability are different questions about the same person, and folding the
+   * second into `Entitlements` made every caller that only wanted the first pay for it: the
+   * catalogue read summed the whole paw ledger for a number it never used, on an endpoint the
+   * camera now calls every time it opens. Separating them is what let that read go away.
+   *
+   * Never the grant. The weekly grant exists to be given away, and `canAfford` takes one
+   * balance so there is no second parameter a grant could be passed as by mistake.
+   */
+  walletBalance: number
 ): UnlockRefusal | null {
   if (!entry) return 'unknown_item';
   if (ownsEntry(entry, who)) return 'already_owned';
@@ -298,7 +308,7 @@ export function unlockRefusal(
    * null however tempting a paw-priced Pro trial looks.
    */
   if (entry.pawPrice === null) return 'not_for_paws';
-  if (!canAfford(who.walletBalance, entry.pawPrice)) return 'insufficient_paws';
+  if (!canAfford(walletBalance, entry.pawPrice)) return 'insufficient_paws';
 
   return null;
 }

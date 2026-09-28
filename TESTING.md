@@ -166,6 +166,79 @@ queries under it.
 
 ---
 
+### The paw economy, which has never executed at all
+
+Nothing below works until the four paw migrations are applied, **in date order**:
+`2026-08-28_five_reactions`, `2026-08-29_paws`, `2026-08-30_paw_spending`,
+`2026-08-31_reveal_attribution`. Confirm with `node scripts/schema-state.mjs` rather than by
+memory. The last one is not optional: the score write stamps `revealed_by`, so until it runs
+**every reveal fails**, including free ones on your own photos.
+
+Most of this needs **two accounts**, because the interesting half of the feature is what
+happens to the other person.
+
+**Giving.** On somebody else's shared photo, tap the paw. The count moves in the same frame and
+the toast reads `1 paw given · 6 left this week`. Give all seven; the eighth must switch to
+`from your wallet`, or to `You are out of paws` with a Shop button if the wallet is empty. That
+switch is the only place the two buckets are ever explained, so it is worth seeing rather than
+assuming. Then open your own photo: the paw half of the bar must be dead. It was pressable
+before this work — the server refused it, but only after the tap had already looked like it
+worked.
+
+**A gift is final.** There is no undo. Confirm a given paw stays given, and that the recipient's
+count does not later go down.
+
+**Revealing your own, once the free scores are gone.** Score twice, then open a third unscored
+photo. The button must read `Reveal for 3 🐾` rather than `Reveal the score`, with the wallet
+balance under it. Afterwards check the allowance did **not** move — a paw-funded reveal writes
+no `reveals` row, which is the whole reason `applyScore` took a flag. The same offer now appears
+on the score result screen straight after capture, which is where a player actually runs out.
+
+**Revealing somebody else's.** From the feed, on an unscored card. Four things, across two
+accounts:
+
+- **you** gain XP, and **twice** what the photographer does;
+- the **photographer** gains the `best_score` if it beats theirs, and you do not;
+- your own free allowance is untouched;
+- the photo reads `Unlocked by <you>` under its breakdown — for the owner too.
+
+Then check your album: their photograph must **not** be in it. `upsertPhoto` is gated on
+`isMine` now and that guard has never run.
+
+**Deleting does not take anything back.** Delete a scored photo and watch the profile meter sit
+exactly where it was — only the album count falls. This reverses behaviour that shipped on
+2026-08-24 and was verified then, so it is the one test here checking that something *stopped*
+happening. Both the server revoke and the client's optimistic subtraction had to come out for it
+to hold, so a half-done job shows up as the meter dropping and then snapping back. Delete one
+somebody else unlocked too: their bonus must survive as well.
+
+**Unlocking a filter.** Before buying, open the camera and swipe to Monochrome: it must wear a
+padlock, slide back, and offer the shop. Buy it for 40 paws — the wallet falls, the row flips to
+`Owned`, and a second tap is refused with `You already have that` rather than charging twice.
+Then go **straight back to the camera**: the padlock must be gone without restarting the app,
+because ownership is refetched on focus.
+
+Also check **Golden Hour below rank 4**. It was always rank-gated in the catalogue and the
+camera never enforced it, so this is a visible change for existing players under that rank —
+they had it, and now they do not.
+
+### The grant period, which rolls with nothing running
+
+The one behaviour with no scheduled job behind it: the weekly grant settles lazily, on read. The
+arithmetic is covered by `check-paws.ts`; what has never run is the lazy settle around it.
+
+Move your own anchor back a week in the SQL editor, then reopen the app:
+
+```sql
+update paw_grants
+   set period_start = period_start - interval '8 days'
+ where user_id = '<your uuid>';
+```
+
+`remaining` must return to 7, and `period_start` must land a **whole window** on — not on
+`now()`. An anchor reset to now is the failure that hides: the grant is still the right size, so
+the only symptom is a reset time that drifts later every week a player is slow to open the app.
+
 ## 4. Before the scorer goes live
 
 `SCORING_STUB=true` stamps `scoring_model = 'stub'` on every row it touches. Those numbers are

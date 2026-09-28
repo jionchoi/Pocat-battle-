@@ -15,6 +15,7 @@ import { chrome, marmalade, paper, measure, radii, spacing, text } from '../../t
 import { compactNumber, countdownLabel } from '../../utils/format';
 import { useAuthStore } from '../../store/authStore';
 import { usePawStore } from '../../store/pawStore';
+import { isNoPaws } from '../../hooks/useShopRoute';
 
 /**
  * Shop (README section 5.7).
@@ -101,9 +102,9 @@ export function ShopScreen() {
    * the state wholesale — one unlock lowers the wallet, which can put every other paw price
    * out of reach, and patching a single row would leave the others claiming otherwise.
    *
-   * The balance is then re-read rather than derived from `walletBalance` on the response: the
-   * store holds both buckets and this reply only knows about one of them. A second request on
-   * an action this rare is not worth a second source of truth for money.
+   * The balance is then re-read rather than patched: the store holds both buckets, and the
+   * catalogue reply deliberately carries no balance at all. A second request on an action this
+   * rare is cheaper than a second source of truth for money.
    */
   const unlock = useCallback(async (item: ShopItem) => {
     setUnlocking(item.id);
@@ -114,9 +115,14 @@ export function ShopScreen() {
       showToast(`${item.name} unlocked.`, 'success');
       await usePawStore.getState().refresh();
     } catch (err) {
+      /*
+       * Not enough paws is neutral, like everywhere else it can happen — nothing broke, the
+       * player cannot afford it yet. No Shop button on this one: they are already in the shop,
+       * and a button that navigates to the screen you are on is a button that does nothing.
+       */
       showToast(
         err instanceof Error ? err.message : 'We could not unlock that.',
-        'error'
+        isNoPaws(err) ? 'neutral' : 'error'
       );
       // Whatever the server thinks is true is worth re-reading after a refusal — an
       // "not enough paws" means this device's balance was stale.

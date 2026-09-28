@@ -1,9 +1,9 @@
 import { useCallback } from 'react';
-import { useNavigation } from '@react-navigation/native';
 
 import { pawApi, type PawBucket } from '../api/endpoints';
 import { showToast } from '../components/Toast';
 import { PAW_CONFIG } from '../constants/game';
+import { isNoPaws, useShopRoute } from './useShopRoute';
 import { isPlaceholderId } from '../constants/placeholders';
 import type { Photo } from '../models';
 import { usePawStore } from '../store/pawStore';
@@ -52,7 +52,7 @@ import { usePawStore } from '../store/pawStore';
 export function usePawGift<T extends Photo>(
   update: (photoId: string, apply: (photo: T) => T) => void
 ) {
-  const navigation = useNavigation();
+  const openShop = useShopRoute();
 
   return useCallback(
     (photo: T) => {
@@ -62,21 +62,11 @@ export function usePawGift<T extends Photo>(
       if (!bucket) {
         /*
          * Out of both. The route to the shop is the point of this toast — a refusal with
-         * nowhere to go is a dead end, and the shop is where paws will be bought.
-         *
-         * `initial: false` is trap 11: without it the profile stack holds `[Shop]` instead of
-         * `[Profile, Shop]`, so back does nothing and pressing the Profile tab reopens the
-         * shop. It cost three separate bug reports on the map tab.
+         * nowhere to go is a dead end, and the shop is where paws will be bought. The route
+         * itself, and trap 11's `initial: false`, live in `useShopRoute`.
          */
         showToast('You are out of paws.', 'neutral', {
-          action: {
-            label: 'Shop',
-            onPress: () =>
-              navigation.navigate('MainTabs', {
-                screen: 'ProfileTab',
-                params: { screen: 'Shop', initial: false },
-              }),
-          },
+          action: { label: 'Shop', onPress: openShop },
           durationMs: PAW_CONFIG.giftToastMs,
         });
         return;
@@ -124,17 +114,29 @@ export function usePawGift<T extends Photo>(
            * The server's own message is used when it sent one, because the two refusals it
            * can give — your own photo, and an empty balance — are both things the player can
            * act on, and a generic "we could not do that" throws away which one happened.
+           *
+           * An empty balance gets the same neutral toast and shop route the client-side check
+           * above gives. This is that case arriving late — this device thought it had a paw and
+           * the server knew better — and it should not look like a failure just because the
+           * server was the one to notice. Red is for things that actually broke.
            */
-          const message =
-            err instanceof Error && err.message ? err.message : 'We could not give that paw.';
-          showToast(message, 'error');
+          if (isNoPaws(err)) {
+            showToast(err.message, 'neutral', {
+              action: { label: 'Shop', onPress: openShop },
+              durationMs: PAW_CONFIG.giftToastMs,
+            });
+          } else {
+            const message =
+              err instanceof Error && err.message ? err.message : 'We could not give that paw.';
+            showToast(message, 'error');
+          }
 
           // Whatever the server thinks is true is worth re-reading after a refusal: an empty
           // balance means the local guess was wrong, and it should stop being wrong now.
           void usePawStore.getState().refresh();
         });
     },
-    [navigation, update]
+    [openShop, update]
   );
 }
 

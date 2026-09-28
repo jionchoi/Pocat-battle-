@@ -97,7 +97,7 @@ const NoPhoto = React.memo(function NoPhoto({ context }: { context: ContextName 
   const c = contextColors(context);
 
   return (
-    <View style={[StyleSheet.absoluteFillObject, styles.noPhoto, { backgroundColor: c.sunken }]}>
+    <View style={[StyleSheet.absoluteFill, styles.noPhoto, { backgroundColor: c.sunken }]}>
       <Text style={[text.caption, { color: c.textFaint }]}>No image</Text>
     </View>
   );

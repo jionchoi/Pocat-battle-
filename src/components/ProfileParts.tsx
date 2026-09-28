@@ -444,7 +444,7 @@ const styles = StyleSheet.create({
     backgroundColor: paper.sunken,
   },
   trophyMissing: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -495,7 +495,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   trophyScrim: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     top: '40%',
     backgroundColor: 'rgba(11, 11, 12, 0.46)',
   },
@@ -577,7 +577,7 @@ const styles = StyleSheet.create({
     aspectRatio: 4 / 5,
   },
   showcaseMissing: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
   },

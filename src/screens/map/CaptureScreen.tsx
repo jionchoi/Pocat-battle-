@@ -13,13 +13,19 @@ import { Button } from '../../components/Button';
 import { showToast } from '../../components/Toast';
 import { useCameraPermission } from '../../hooks/useCameraPermission';
 import { useLocation } from '../../hooks/useLocation';
+import { useOwnedFilters } from '../../hooks/useOwnedFilters';
+import { useShopRoute } from '../../hooks/useShopRoute';
 import { photoApi } from '../../api/endpoints';
 import { ApiRequestError } from '../../api/client';
 import { uploadCapture } from '../../lib/photoUpload';
 import { useAlbumStore } from '../../store/albumStore';
 import { useAuthStore } from '../../store/authStore';
 import { CAPTURE_PROGRESS, useCaptureStore } from '../../store/captureStore';
-import { DEFAULT_FILTER_ID } from '../../constants/filters';
+import {
+  CAPTURE_FILTERS,
+  DEFAULT_FILTER_ID,
+  type CaptureFilter,
+} from '../../constants/filters';
 import { arena, radii, spacing, text } from '../../theme';
 import type { MapStackParamList } from '../../navigation/types';
 
@@ -60,6 +66,47 @@ export function CaptureScreen() {
    * uploaded bytes are the camera's own frame. See `constants/filters.ts`.
    */
   const [filterId, setFilterId] = useState<string>(DEFAULT_FILTER_ID);
+
+  /**
+   * The looks this player may not use yet — earned by rank, or bought with paws.
+   *
+   * Empty while ownership is unknown, which is the fail-open `useOwnedFilters` documents: the
+   * cost of being wrong in that direction is one free *preview*, and filters never reach the
+   * file or the score.
+   *
+   * The rail enforces it, including snapping back off a filter that turns out to be locked
+   * once the answer lands. That logic lives in `ShutterRail` rather than here, because it has
+   * to move the scroll position and the selection in the same breath — reset the selection
+   * from out here and the rail stays scrolled to a look the shutter is no longer wearing.
+   */
+  const ownedFilters = useOwnedFilters();
+  const lockedFilterIds = useMemo<ReadonlySet<string>>(
+    () =>
+      ownedFilters === null
+        ? new Set()
+        : new Set(CAPTURE_FILTERS.map((f) => f.id).filter((id) => !ownedFilters.has(id))),
+    [ownedFilters]
+  );
+
+  const openShop = useShopRoute();
+
+  /**
+   * A locked look was reached for. Say so, and offer the door.
+   *
+   * A toast rather than an inline message, because the rail has already slid back to what is
+   * loaded — the player's attention is on the viewfinder, and a sheet over a live camera for a
+   * cosmetic they cannot have yet would be the most intrusive possible answer to the least
+   * important question on the screen.
+   */
+  const onLockedFilter = useCallback(
+    (filter: CaptureFilter) => {
+      showToast(`${filter.label} is locked.`, 'neutral', {
+        action: { label: 'Shop', onPress: openShop },
+        durationMs: 5_000,
+      });
+    },
+    [openShop]
+  );
 
   const cameraPermission = useCameraPermission();
   const { permission: locationPermission, position, request: requestLocation } =
@@ -628,6 +675,8 @@ export function CaptureScreen() {
           onClose={close}
           filterId={filterId}
           onSelectFilter={setFilterId}
+          lockedFilterIds={lockedFilterIds}
+          onLockedFilter={onLockedFilter}
         />
       )}
 
@@ -775,7 +824,7 @@ const styles = StyleSheet.create({
    * glass. Preview and file are reconciled there, not here — see `sixteenNineCrop`.
    */
   viewfinder: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     /*
      * Contains the filter's blend mode, and clips it to the picture.
      *
@@ -795,7 +844,7 @@ const styles = StyleSheet.create({
    * below the point where the viewfinder stops matching the shot.
    */
   grain: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: '#000000',
     opacity: 0.03,
   },
@@ -817,7 +866,7 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   rejection: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: arena.scrim,
     justifyContent: 'flex-end',
     padding: spacing.md,

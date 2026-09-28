@@ -40,6 +40,9 @@ import { IdentifySheet } from '../../components/IdentifySheet';
 import { useAlbumStore } from '../../store/albumStore';
 import { useAuthStore } from '../../store/authStore';
 import { useCaptureStore } from '../../store/captureStore';
+import { usePawStore } from '../../store/pawStore';
+import { isNoPaws, useShopRoute } from '../../hooks/useShopRoute';
+import { PAW_CONFIG } from '../../constants/game';
 import {
   arena,
   chrome,
@@ -170,7 +173,7 @@ export function ScoreResultScreen() {
   const [failureDismissed, setFailureDismissed] = useState(false);
   /** Which of the small actions is mid-flight, so only that one shows a wait. */
   const [busy, setBusy] = useState<
-    'dex' | 'phone' | 'map' | 'album' | 'score' | 'retake' | null
+    'dex' | 'phone' | 'map' | 'album' | 'score' | 'reveal' | 'retake' | null
   >(
     null
   );
@@ -383,6 +386,49 @@ export function ScoreResultScreen() {
       setBusy(null);
     }
   }, [result, succeed]);
+
+  const openShop = useShopRoute();
+  const pawWallet = usePawStore((s) => s.wallet);
+
+  /**
+   * Reveals the score now, paid for in paws, because the free ones are used.
+   *
+   * This is the moment the feature was asked for. A player takes a photograph, the allowance is
+   * gone, and the screen that used to answer "Saved, not yet scored" with a padlock and a time
+   * now also answers "or now, for three paws". Sending them to the album to find the same
+   * button on Photo Detail was a two-screen detour at the exact point they wanted the number.
+   *
+   * Same request as `retryScore` — the server decides the funding and, with the allowance
+   * spent, it will draw paws — but a separate function, because the two fail differently: a
+   * retry that fails is a scorer having a bad moment, and a reveal refused here is almost
+   * always the wallet, which wants a route to the shop rather than a red toast.
+   *
+   * The wallet is re-read after a success. The reply carries the photograph and the allowance
+   * and not the balance, so the store would otherwise keep offering paws that were just spent.
+   */
+  const revealWithPaws = useCallback(async () => {
+    if (!result) return;
+
+    setBusy('reveal');
+    try {
+      succeed(await photoApi.reveal(result.photo.id));
+      void usePawStore.getState().refresh();
+    } catch (err) {
+      if (isNoPaws(err)) {
+        showToast(err.message, 'neutral', {
+          action: { label: 'Shop', onPress: openShop },
+          durationMs: PAW_CONFIG.giftToastMs,
+        });
+      } else {
+        showToast(
+          err instanceof Error ? err.message : 'We could not reach the scorer.',
+          'error'
+        );
+      }
+    } finally {
+      setBusy(null);
+    }
+  }, [openShop, result, succeed]);
 
   /**
    * Records which cat this photograph is of.
@@ -719,6 +765,36 @@ export function ScoreResultScreen() {
               <Text style={[text.bodySm, styles.subtitle]}>
                 {allowanceLine(allowance)}
               </Text>
+
+              {/*
+                The paid way past the padlock.
+
+                Only on the ordinary unscored path — the allowance ran out. Not when there is a
+                `scoreError`: that photograph failed to score and has its own sheet with a free
+                retry, and offering to charge paws for something a free retry might fix would be
+                selling a player their own second chance. Not on Pro either, where `remaining`
+                is null and the padlock cannot appear for this reason at all.
+
+                Not disabled when the wallet looks short. Same rule as everywhere else a price is
+                offered: this device's balance is a snapshot, the server refuses, and the refusal
+                routes to the shop.
+              */}
+              {!result.scoreError && allowance.remaining !== null ? (
+                <View style={{ marginTop: spacing.md, alignItems: 'center', gap: spacing.xs }}>
+                  <Button
+                    label={`Reveal for ${PAW_CONFIG.revealCost} 🐾`}
+                    onPress={() => void revealWithPaws()}
+                    loading={busy === 'reveal'}
+                    disabled={busy !== null}
+                    context="arena"
+                    compact
+                    accessibilityHint={`Spends ${PAW_CONFIG.revealCost} paws from your wallet to score this photo now`}
+                  />
+                  <Text style={[text.caption, { color: arena.textMuted }]}>
+                    {`From your wallet — ${pawWallet} paw${pawWallet === 1 ? '' : 's'} left`}
+                  </Text>
+                </View>
+              ) : null}
             </>
           )}
         </Animated.View>
@@ -1004,7 +1080,12 @@ export function ScoreResultScreen() {
         busy={busy === 'album'}
         onDeleteExisting={(photoId) => void deleteExisting(photoId)}
         onDiscardNew={() => void discardNew()}
-        onOpenShop={() => navigation.navigate('ProfileTab', { screen: 'Shop' })}
+        /*
+          Through `useShopRoute`, which carries trap 11's `initial: false`. This used to navigate
+          inline without it, so opening the shop from the album-full sheet made it the profile
+          stack's only screen: back went nowhere, and the Profile tab reopened the shop.
+        */
+        onOpenShop={openShop}
       />
 
       {/*
@@ -1034,13 +1115,23 @@ export function ScoreResultScreen() {
  * it comes from the server rather than being counted down here, because the clock that
  * matters is the one doing the rationing.
  */
+/**
+ * What to say under the padlock.
+ *
+ * It used to offer one way forward — wait — because waiting was the only one. Paws are the
+ * second, and the sentence names both so the button under it does not arrive unexplained. The
+ * wait is still said first: it is free, and a screen that led with the paid option would be
+ * selling the thing it should be mentioning.
+ */
 function allowanceLine(allowance: ScoredCapture['allowance']): string {
-  if (!allowance.resetsAt) return 'Open it from your album to reveal the score.';
+  if (!allowance.resetsAt) {
+    return 'Your free scores are used for now. It is safe in your album — or reveal it now with paws.';
+  }
 
   const at = new Date(allowance.resetsAt);
   const time = at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
-  return `Your next score unlocks around ${time}. The photo is safe in your album until then.`;
+  return `Your next free score unlocks around ${time}, and the photo is safe in your album until then — or reveal it now with paws.`;
 }
 
 /**

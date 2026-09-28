@@ -56,23 +56,25 @@ export async function catalog(userId: string) {
   const rank = stats?.rank ?? 1;
   const proActive = row.pro_subscription_active === true;
 
-  const [unlockedIds, walletBalance] = await Promise.all([
-    unlockedIdsOf(userId),
-    walletOf(userId),
-  ]);
+  /*
+   * No wallet read here, deliberately.
+   *
+   * This used to sum the player's whole paw ledger and send the total along, on the theory that
+   * the screen needed it to know whether a price was within reach. It does not: the shop draws
+   * its balance from `pawStore`, and the buy buttons are never disabled on affordability —
+   * the server refuses, because this device's copy of a balance is always a snapshot.
+   *
+   * So it was a full ledger scan for a field nothing read, and the cost stopped being
+   * theoretical when the **camera** started calling this endpoint on every focus to find out
+   * which filters the player owns. Ownership is three cheap reads; affordability is the
+   * expensive one, and only the unlock path needs it.
+   */
+  const unlockedIds = await unlockedIdsOf(userId);
 
   return {
     proActive,
     photographerRank: rank,
-    /*
-     * The wallet rides along with the catalogue.
-     *
-     * The screen draws a paw price on every purchasable row and has to know whether the player
-     * can meet it — without this it would need a second request to render one screen, and the
-     * two answers could disagree about the balance by the time both landed.
-     */
-    walletBalance,
-    items: catalogFor({ rank, proActive, unlockedIds, walletBalance }),
+    items: catalogFor({ rank, proActive, unlockedIds }),
   };
 }
 
@@ -82,6 +84,9 @@ export async function catalog(userId: string) {
  * Pulled out because the unlock path needs exactly the same picture the catalogue read does —
  * and a second, subtly different version of "what does this player own" is how an item comes
  * to be purchasable on one screen and already-owned on another.
+ *
+ * Ownership only. The wallet is not in here: it is read once by `unlock`, which is the only
+ * caller that needs to know what the player can afford.
  */
 async function entitlementsOf(userId: string): Promise<Entitlements> {
   const { data, error } = await supabase
@@ -100,16 +105,10 @@ async function entitlementsOf(userId: string): Promise<Entitlements> {
 
   const stats = Array.isArray(row.player_stats) ? row.player_stats[0] : row.player_stats;
 
-  const [unlockedIds, walletBalance] = await Promise.all([
-    unlockedIdsOf(userId),
-    walletOf(userId),
-  ]);
-
   return {
     rank: stats?.rank ?? 1,
     proActive: row.pro_subscription_active === true,
-    unlockedIds,
-    walletBalance,
+    unlockedIds: await unlockedIdsOf(userId),
   };
 }
 
@@ -149,9 +148,14 @@ async function unlockedIdsOf(userId: string): Promise<string[]> {
  */
 export async function unlock(userId: string, entryId: string) {
   const entry = entryById(entryId);
-  const who = await entitlementsOf(userId);
 
-  const refusal = unlockRefusal(entry, who);
+  /*
+   * Ownership and the wallet, together, because this is the one path that needs both — and in
+   * parallel, because neither answer depends on the other.
+   */
+  const [who, wallet] = await Promise.all([entitlementsOf(userId), walletOf(userId)]);
+
+  const refusal = unlockRefusal(entry, who, wallet);
 
   if (refusal === 'unknown_item') {
     throw new HttpError(404, 'That item is not in the shop.');

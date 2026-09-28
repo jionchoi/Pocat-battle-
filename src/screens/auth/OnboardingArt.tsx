@@ -378,7 +378,7 @@ const styles = StyleSheet.create({
     backgroundColor: paper.sunken,
   },
   photoLabelWrap: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -395,7 +395,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   wallRow: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     flexDirection: 'row',
     gap: 4,
   },

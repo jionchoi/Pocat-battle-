@@ -17,7 +17,7 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
-import { X } from 'phosphor-react-native';
+import { LockSimple, X } from 'phosphor-react-native';
 
 import type { CapturePhase } from '../store/captureStore';
 import {
@@ -88,6 +88,15 @@ export interface CaptureOverlayProps {
   /** The selected filter's id. Owned by the screen so it survives the scoring overlay. */
   filterId: string;
   onSelectFilter: (id: string) => void;
+  /**
+   * Looks the player does not own. Drawn with a padlock, and refused by the rail.
+   *
+   * Empty means nothing is locked — which is also what the screen passes while ownership is
+   * still loading. See `useOwnedFilters` on why that fails open.
+   */
+  lockedFilterIds: ReadonlySet<string>;
+  /** A locked look was reached for. The screen decides what to say about it. */
+  onLockedFilter: (filter: CaptureFilter) => void;
 }
 
 export const CaptureOverlay = React.memo(function CaptureOverlay({
@@ -96,6 +105,8 @@ export const CaptureOverlay = React.memo(function CaptureOverlay({
   onClose,
   filterId,
   onSelectFilter,
+  lockedFilterIds,
+  onLockedFilter,
 }: CaptureOverlayProps) {
   const busy = phase === 'capturing' || phase === 'scoring';
 
@@ -132,6 +143,8 @@ export const CaptureOverlay = React.memo(function CaptureOverlay({
           onSelect={onSelectFilter}
           onShutter={onShutter}
           disabled={busy}
+          lockedIds={lockedFilterIds}
+          onLocked={onLockedFilter}
         />
 
         {/*
@@ -186,11 +199,15 @@ const ShutterRail = React.memo(function ShutterRail({
   onSelect,
   onShutter,
   disabled,
+  lockedIds,
+  onLocked,
 }: {
   selectedId: string;
   onSelect: (id: string) => void;
   onShutter: () => void;
   disabled: boolean;
+  lockedIds: ReadonlySet<string>;
+  onLocked: (filter: CaptureFilter) => void;
 }) {
   const scroller = useRef<ScrollView | null>(null);
   const { width: windowWidth } = useWindowDimensions();
@@ -224,15 +241,54 @@ const ShutterRail = React.memo(function ShutterRail({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /*
+   * Moves off a look that has just turned out to be locked.
+   *
+   * Ownership arrives a request after the rail does, and fails open until then — so a player
+   * can land on a look in that window which the answer then says they do not have. When that
+   * happens the rail slides to the first look they *do* own and hands the shutter that one,
+   * in one step. Doing only half of it is the bug this is placed here to avoid: reset the
+   * selection without the scroll and the row stays parked on a look the shutter is no longer
+   * wearing; scroll without the selection and the shutter keeps a filter it was refused.
+   *
+   * Keyed on `lockedIds` alone, never on `selectedId`. Reacting to the selection would fight
+   * the finger — the mount-only note above explains — and the only thing that can make the
+   * current selection *newly* locked is a change in what is locked.
+   */
+  useEffect(() => {
+    if (!lockedIds.has(selectedId)) return;
+
+    const fallback = CAPTURE_FILTERS.findIndex((f) => !lockedIds.has(f.id));
+    const next = fallback === -1 ? 0 : fallback;
+
+    scroller.current?.scrollTo({ x: next * ITEM_WIDTH, animated: true });
+    onSelect(CAPTURE_FILTERS[next]!.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lockedIds]);
+
   const commit = useCallback(
     (next: number, scroll: boolean) => {
       const filter = CAPTURE_FILTERS[next];
       if (!filter) return;
 
+      /*
+       * A locked look is refused here, and the row slides back to what is loaded.
+       *
+       * Refused rather than selected-with-a-warning: the shutter *is* the selected look, so
+       * letting a locked one reach the middle would put a filter the player does not own on
+       * the button that takes the photograph. Sliding back makes the rule visible without a
+       * word, and `onLocked` supplies the word and the way to the shop.
+       */
+      if (lockedIds.has(filter.id)) {
+        scroller.current?.scrollTo({ x: index * ITEM_WIDTH, animated: true });
+        onLocked(filter);
+        return;
+      }
+
       if (scroll) scroller.current?.scrollTo({ x: next * ITEM_WIDTH, animated: true });
       if (filter.id !== selectedId) onSelect(filter.id);
     },
-    [onSelect, selectedId]
+    [index, lockedIds, onLocked, onSelect, selectedId]
   );
 
   /**
@@ -272,7 +328,11 @@ const ShutterRail = React.memo(function ShutterRail({
             style={styles.slot}
             accessibilityRole="button"
             accessibilityState={{ selected: i === index }}
-            accessibilityLabel={`${filter.label} filter`}
+            accessibilityLabel={
+              lockedIds.has(filter.id)
+                ? `${filter.label} filter, locked`
+                : `${filter.label} filter`
+            }
             /*
              * The centred one is drawn by the shutter instead. It stays here — invisible and
              * inert — only to hold its place in the stride. See the note at the top.
@@ -282,6 +342,7 @@ const ShutterRail = React.memo(function ShutterRail({
             <FilterFace
               filter={filter}
               size={SIDE}
+              locked={lockedIds.has(filter.id)}
               style={{ opacity: i === index ? 0 : 1 }}
             />
           </Pressable>
@@ -327,17 +388,24 @@ const ShutterRail = React.memo(function ShutterRail({
 const FilterFace = React.memo(function FilterFace({
   filter,
   size,
+  locked = false,
   style,
 }: {
   filter: CaptureFilter;
   size: number;
+  /** Drawn under a padlock. The look itself still shows through — see `LockMark`. */
+  locked?: boolean;
   style?: StyleProp<ViewStyle>;
 }) {
   const shape = { width: size, height: size, borderRadius: size / 2 };
 
   // See above: no layer means no scene either. A flat white disc, and nothing composited.
   if (!filter.layer) {
-    return <View style={[styles.face, styles.faceNatural, shape, style]} />;
+    return (
+      <View style={[styles.face, styles.faceNatural, shape, style]}>
+        {locked ? <LockMark size={size} /> : null}
+      </View>
+    );
   }
 
   return (
@@ -359,9 +427,29 @@ const FilterFace = React.memo(function FilterFace({
           },
         ]}
       />
+      {locked ? <LockMark size={size} /> : null}
     </View>
   );
 });
+
+/**
+ * The padlock over a look the player does not own yet.
+ *
+ * A dimming scrim with the glyph on it, rather than a greyed-out face. The swatch is the
+ * advertisement — it is the one thing on the rail that shows what the look *does* — so it
+ * keeps showing through, darkened, instead of being replaced by a lock on a blank disc. A
+ * player should be able to see what they would be unlocking.
+ */
+function LockMark({ size }: { size: number }) {
+  return (
+    <View
+      pointerEvents="none"
+      style={[styles.lockMark, { borderRadius: size / 2 }]}
+    >
+      <LockSimple size={Math.round(size * 0.38)} weight="fill" color={chrome.text} />
+    </View>
+  );
+}
 
 /* -------------------------------------------------------------------------- */
 /* Prompt and shutter                                                         */
@@ -439,6 +527,16 @@ const Shutter = React.memo(function Shutter({
 });
 
 const styles = StyleSheet.create({
+  /**
+   * Over the whole face, and as round as it. A plain translucent black: this sits on three
+   * different swatches and has to darken each of them without tinting any of them.
+   */
+  lockMark: {
+    ...StyleSheet.absoluteFill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+  },
   top: {
     position: 'absolute',
     top: 62,
@@ -501,7 +599,7 @@ const styles = StyleSheet.create({
     borderWidth: 0,
   },
   shutterLayer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
   },

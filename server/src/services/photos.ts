@@ -591,10 +591,18 @@ async function fundingFor(userId: string, mine: boolean): Promise<'allowance' | 
      * it. It is not any more: the player can be given paws, or buy them, and the client tells
      * these apart by the code to route to the shop rather than to a countdown.
      */
+    /*
+     * Both messages have to say the wallet is empty, because that is the only way to get here.
+     *
+     * The first draft of the owner's line read "Reveal this one with paws, or wait for a slot"
+     * — which is advice to do the thing that had just failed. This branch is reached only when
+     * the allowance is gone *and* the paws are too, so it names both and leaves waiting as the
+     * one route that is actually open.
+     */
     throw new HttpError(
       409,
       mine
-        ? 'You have used your free scores. Reveal this one with paws, or wait for a slot.'
+        ? 'You have used your free scores and do not have enough paws. Another score frees up soon.'
         : 'You do not have enough paws to reveal that.',
       'no_paws'
     );

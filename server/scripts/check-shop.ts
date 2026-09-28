@@ -14,6 +14,8 @@
  * deliberately unbuilt — so the day somebody builds it, this file fails and says why.
  */
 
+import { readFileSync } from 'node:fs';
+
 import {
   CATALOG,
   catalogFor,
@@ -25,20 +27,22 @@ import {
 } from '../src/game/shop.js';
 
 /**
- * An `Entitlements` for a player who has bought nothing and has no paws.
+ * An `Entitlements` for a player who has bought nothing.
  *
  * Most of this file is about rank and Pro, which is where entitlement came from before paws
- * existed — so the two newer fields default to "owns nothing, can afford nothing" and the
- * cases that care about them pass their own. That keeps the older checks reading as they did
- * while making it impossible to write one that silently omits the new fields.
+ * existed — so `unlockedIds` defaults to empty and the cases that care about it pass their own.
+ * That keeps the older checks reading as they did while making it impossible to write one that
+ * silently omits the new field.
+ *
+ * There is no balance in here, and that is the point of the type: what a player *owns* is a
+ * different question from what they can *afford*, and only `unlockRefusal` asks the second one.
  */
 function who(
   rank: number,
   proActive: boolean,
-  unlockedIds: readonly string[] = [],
-  walletBalance = 0
+  unlockedIds: readonly string[] = []
 ): Entitlements {
-  return { rank, proActive, unlockedIds, walletBalance };
+  return { rank, proActive, unlockedIds };
 }
 
 let failures = 0;
@@ -227,14 +231,17 @@ console.log('\n-- what may be bought with paws --\n');
 
 /*
  * `pawPrice: null` is the default and the safe value: adding a filter to the catalogue must
- * not make it buyable by accident. Exactly one entry is priced today, and that is deliberate —
- * it exists so the unlock path is reachable on a device rather than being a branch nothing
- * ever enters.
+ * not make it buyable by accident.
+ *
+ * This used to assert that *exactly one* entry was priced and that it was Monochrome. That was
+ * a check on today's authored content rather than on a rule, and it would have failed the first
+ * time anybody priced a second filter — which is precisely what the catalogue is for. What
+ * actually has to be true is that the unlock path is reachable at all: a mechanism nothing is
+ * priced for is a branch nothing ever enters, and nobody would notice it rotting.
  */
 const priced = CATALOG.filter((e) => e.pawPrice !== null);
 
-check('exactly one entry is priced in paws today', priced.length, 1);
-check('and it is the worked example', priced[0]?.id, 'filter-monochrome');
+ok('at least one entry is priced in paws, so the unlock path is reachable', priced.length >= 1);
 
 ok(
   'every paw price is a positive whole number',
@@ -268,11 +275,15 @@ console.log('\n-- unlock refusals, in order --\n');
 const monochrome = entry('filter-monochrome');
 const price = monochrome.pawPrice ?? 0;
 
-check('an unknown id is refused first', unlockRefusal(undefined, who(1, false, [], 999)), 'unknown_item');
+check(
+  'an unknown id is refused first',
+  unlockRefusal(undefined, who(1, false), 999),
+  'unknown_item'
+);
 
 check(
   'something already bought is refused before the price is looked at',
-  unlockRefusal(monochrome, who(1, false, ['filter-monochrome'], 0)),
+  unlockRefusal(monochrome, who(1, false, ['filter-monochrome']), 0),
   'already_owned'
 );
 
@@ -283,41 +294,87 @@ check(
  */
 check(
   'a rank item you have reached reads as owned, not as unsellable',
-  unlockRefusal(entry('filter-golden-hour'), who(40, false, [], 999)),
+  unlockRefusal(entry('filter-golden-hour'), who(40, false), 999),
   'already_owned'
 );
 check(
   'a rank item you have not reached is simply not for paws',
-  unlockRefusal(entry('filter-golden-hour'), who(1, false, [], 999)),
+  unlockRefusal(entry('filter-golden-hour'), who(1, false), 999),
   'not_for_paws'
 );
 
 check(
   'Pro is refused as not-for-paws however rich you are',
-  unlockRefusal(entry('pro-subscription'), who(1, false, [], 999_999)),
+  unlockRefusal(entry('pro-subscription'), who(1, false), 999_999),
   'not_for_paws'
 );
 
 check(
   'an affordable priced item is not refused',
-  unlockRefusal(monochrome, who(1, false, [], price)),
+  unlockRefusal(monochrome, who(1, false), price),
   null
 );
 check(
   'one paw short is refused',
-  unlockRefusal(monochrome, who(1, false, [], price - 1)),
+  unlockRefusal(monochrome, who(1, false), price - 1),
   'insufficient_paws'
 );
 
 /*
- * The grant is not a parameter of any of this, and cannot be — `Entitlements` carries a
- * wallet balance and nothing else. Spending the weekly grant would break the rule that giving
- * costs nothing, and the type is what enforces it rather than a comment somewhere.
+ * Affordability is a separate argument from ownership, and neither of them mentions the grant.
+ *
+ * Two rules in one assertion, and both are structural rather than a matter of care. `who` has
+ * no balance on it at all, so a caller asking "do they own this" cannot accidentally depend on
+ * what they can pay — which is what let the catalogue read stop summing the ledger. And the
+ * balance `unlockRefusal` does take is a single number, so there is no second parameter a
+ * weekly grant could be passed as: spending the grant would break the rule that giving costs
+ * nothing, and the signature is what enforces it rather than a comment somewhere.
  */
+const ownership = who(1, false) as Record<string, unknown>;
 ok(
-  'affordability reads a wallet, and there is nowhere to pass a grant',
-  !('grant' in who(1, false, [], 10))
+  'ownership carries no balance, so it cannot be confused with affordability',
+  !('walletBalance' in ownership) && !('grant' in ownership)
 );
+
+console.log('\n-- the camera rail and the catalogue must agree --\n');
+
+/*
+ * A filter lives in two places, and this is what keeps them one fact.
+ *
+ * Its *look* is in the client's `constants/filters.ts` — a blend mode and a colour, which only
+ * the camera can render. Its *terms* are here: whether rank earns it, whether paws buy it, and
+ * what it costs. The capture screen locks any look the catalogue says the player does not own,
+ * so the two halves drifting has a sharp failure in each direction:
+ *
+ *   - a look on the rail with no catalogue row is **locked forever** — nothing can own an item
+ *     that does not exist, so a new filter added to the client alone is unusable by everybody;
+ *   - a catalogue filter with no look is **sellable and invisible** — a player can pay paws for
+ *     it and find nothing on the camera.
+ *
+ * Adding a filter is therefore a two-file change, and this is the check that makes forgetting
+ * one of the two a failure here rather than a support ticket. `filters.ts` is a React Native
+ * module and will not import under plain tsx, so its ids are read as text — the same approach
+ * `check-community.ts` takes with the reaction set.
+ */
+const filterSource = readFileSync(
+  new URL('../../src/constants/filters.ts', import.meta.url),
+  'utf8'
+);
+
+const railIds = (filterSource.match(/id:\s*'filter-[a-z0-9-]+'/g) ?? []).map((found) =>
+  found.replace(/^id:\s*'/, '').slice(0, -1)
+);
+
+ok('the camera filters were found in the client', railIds.length > 0);
+
+for (const id of railIds) {
+  const row = CATALOG.find((e) => e.id === id);
+  ok(`'${id}' on the camera rail has a catalogue row`, row !== undefined && row.kind === 'filter');
+}
+
+for (const row of CATALOG.filter((e) => e.kind === 'filter')) {
+  ok(`catalogue filter '${row.id}' has a look on the camera rail`, railIds.includes(row.id));
+}
 
 console.log('\n-- the whole response, for one player --\n');
 

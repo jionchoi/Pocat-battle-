@@ -17,7 +17,8 @@ for f in scripts/check-*.ts; do npx tsx "$f" >/dev/null && echo "ok $f" || echo 
 npx tsc --noEmit && cd .. && npx tsc --noEmit                   # both trees
 ```
 
-Last run 2026-08-31: **both trees clean, all 12 checks pass.** (`TESTING.md` §1 said "nine
+Last run 2026-09-28: **both trees clean, all 12 checks pass**, client on SDK 57 with
+`expo-doctor` 21/21 and a clean iOS bundle. (`TESTING.md` §1 said "nine
 scripts" for a fortnight after there were eleven; it now says twelve and lists twelve, which is
 what `ls server/scripts/check-*.ts` reports.)
 
@@ -60,6 +61,49 @@ on a phone (2026-08-12), one anonymous `/feed/viral` read (2026-08-13). Everythi
 **"Typechecks" is not "works".**
 
 ---
+
+## Shipped 2026-09-28 — Expo SDK 54 → 57, so the app runs on a real iPhone again
+
+Expo Go for iOS only ever ships the latest SDK, and the App Store copy is SDK 57 — so an SDK 54
+project could not be opened on a physical iPhone at all, and the usual escape hatch (an iOS
+simulator) needs macOS. The choice was a dev build, an Android device, or this. This is what was
+chosen, and it turned out far cheaper than the old Parked note feared.
+
+- **`expo@57.0.25`, React Native 0.86.3, React 19.2.3, Reanimated 4.5.1, worklets 0.10.1**, and
+  all twenty-odd `expo-*` packages on 57.x. 29 native modules re-pinned by
+  `npx expo install --fix`. TypeScript went to 6.0.3 and `@types/react` to 19.2.4, both because
+  SDK 57 asks for them
+- **No `prebuild` and no CocoaPods/Gradle surgery.** There is no `ios/` or `android/` directory
+  — this is a CNG project, so the native projects are generated at build time and the whole
+  bare-workflow half of the upgrade checklist does not apply
+- **`StyleSheet.absoluteFillObject` is gone from RN 0.86** — 23 sites across 14 files. It is not
+  merely untyped: the name appears nowhere in the package, so spreading it would have silently
+  produced a style with no absolute positioning, breaking every full-screen overlay, scrim and
+  the camera filter layer. `StyleSheet.absoluteFill` is now a plain frozen object with exactly
+  the old shape (`StyleSheet.create` is an identity function these days), so the fix was a
+  mechanical rename rather than a rewrite
+- **`expo.splash` is no longer a valid config field.** Both values moved into the
+  `expo-splash-screen` config plugin, which is what took `expo-doctor` from 20/21 to 21/21.
+  `expo install --fix` also added the four config plugins SDK 57 now requires — `expo-image`,
+  `expo-splash-screen`, `expo-sqlite`, `expo-status-bar`
+- **`newArchEnabled` removed** from app.json; the new architecture has been the default since
+  SDK 53 and the flag is no longer read
+- **The duplicate `babel-preset-expo` is gone** — a Parked item that stopped being harmless the
+  moment the upgrade bumped the `devDependencies` copy to 57 and left the `dependencies` copy on
+  54. It is a build-time preset and now lives in `devDependencies` alone. `babel.config.js` was
+  **kept**: it is not just the preset, it carries `react-native-worklets/plugin`, which
+  Reanimated 4 needs and which must stay last in the plugin list
+- **Verified as far as is possible without a device**: `expo-doctor` 21/21, both trees
+  typecheck, all 12 game checks pass, and `npx expo export -p ios` produced an 11MB Hermes
+  bundle — every module resolved and compiled, React Navigation 6 against RN 0.86 included.
+  What that does **not** prove is anything about how it behaves once running: Reanimated 4.5 and
+  gesture-handler 2.32 are the usual casualties of an RN jump, and the app's animations are
+  worklet-heavy
+- **To launch it:** `npx expo start -c`. The `-c` matters — `EXPO_PUBLIC_*` is inlined at build
+  time (trap 5), and the cache is stale across an upgrade this size. The client rewrites a
+  `localhost` API base to whichever host Metro was reached on (`src/api/client.ts`), so a phone
+  finds the dev server on its own, but **the server has to be running** for anything with paws
+  in it
 
 ## Shipped 2026-08-31 — the paw economy. **None of it has run against a real database**
 
@@ -205,6 +249,36 @@ anything but a 500.
   had built purchasing and `ownsEntry` needed a table to read. It now asserts that ownership
   follows the entitlement — plus that an `entitlements` row **cannot** unlock a rank-gated item
   early, which is what stops a bad write buying past a rank gate
+- **The camera never checked filter ownership at all — so buying one did nothing.** The rail
+  held its selection in plain state and offered every look to everybody; `game/shop.ts` gated
+  two of the three behind rank and nothing on the capture screen ever asked. Harmless while
+  filters could only be earned, and a paid button that unlocks nothing once they could be
+  bought. `useOwnedFilters` now reads `owned` off the catalogue on every camera focus (so an
+  unlock is live when you come back), locked faces wear a padlock with the swatch still
+  showing through, and landing on one slides back and offers the shop. It **fails open** while
+  ownership is unknown: the cost of that is one free *preview*, since filters never reach the
+  file or the score, and the alternative locks owned filters on every slow connection
+- **Adding a filter is a two-file change, and `check-shop.ts` now enforces it.** The look lives
+  in `src/constants/filters.ts`; the terms (rank, paw price) live in `game/shop.ts`. A look
+  with no catalogue row is locked for everybody forever, and a catalogue row with no look is
+  sellable and invisible — so the check reads the client file as text and fails on either.
+  The old "exactly one entry is priced" assertion is now "at least one": it was a check on
+  today's content, and it would have failed the first time a second filter was priced
+- **"Reveal for 3 🐾" on the score result, right after capture.** The padlock there used to be
+  the end of the road — the paid reveal was only on Photo Detail, two screens away, at the
+  exact moment somebody runs out of free scores. Shown only on the ordinary out-of-allowance
+  path: not on a `scoreError` (that has a free retry, and charging for what a retry might fix
+  would be selling a player their own second chance) and not on Pro
+- **`no_paws` now actually routes to the shop.** The server comment said the client told this
+  refusal apart by its code; nothing did. `isNoPaws` + `useShopRoute` are now the one way to do
+  it, shared by the paw button, both reveal buttons and the camera rail — the inline
+  `navigate` in `usePawGift` was the first copy of what would otherwise have been four
+- **Two older shop routes were missing trap 11's `initial: false`** — the album's Pro upsell
+  (`PhotoAlbumGridScreen`) and the album-full sheet on the score result. Found by grepping for
+  inline shop navigation once `useShopRoute` existed; both now go through it. Not paw work, and
+  not from this session — but it is exactly the "same defence written out twice, missing from
+  one" failure trap 18 describes, and here it was missing from both. Every `no_paws` refusal is
+  now a neutral toast rather than a red one, the shop's own unlock button included
 
 ## Shipped 2026-08-24, none of it run
 
@@ -239,6 +313,34 @@ Here so a cold session knows what moved. All of it is client-side unless noted.
   countdown that were deleted when capture went manual. Fixed.
 
 ---
+
+## Known limits of the paw economy — no transactions, and what that costs
+
+Not bugs to fix now, but the honest list, because every one of them is a place a paw can be
+gained or lost and none of them will announce itself. PostgREST gives us statements rather than
+transactions, so every balance in the economy is read-then-written and two requests can
+interleave. `services/progression.ts` already documents the same shape for XP and reaches the
+same conclusion: survivable, and the real fix is a Postgres function.
+
+Every case below needs two requests in flight at the same instant, and each costs at most one
+paw:
+
+- **Two simultaneous gifts** can both read `remaining: 1` and both write `0`, so one paw is
+  given twice. `paw_grants_remaining_nonnegative` stops it going below zero, so the damage is
+  bounded at a paw rather than a negative balance.
+- **Two simultaneous spends** can both pass `canAfford`, so the wallet's ledger sum can go
+  slightly negative. `walletBalance` floors the display at zero, so a player never *sees* a
+  negative balance — but they did get something for free.
+- **Two people revealing the same photograph at the same moment** both pass the `scored_at`
+  check, so both pay and both call the model. One of them paid for a score that was already
+  arriving. `MAX_SCORING_ATTEMPTS` caps how far that can go.
+
+What makes all three tolerable is that they are self-inflicted or vanishingly rare, that the
+ledger records exactly what happened either way, and that **the ledger is the authority** — so
+each is answerable and refundable by hand, which is the whole reason it is a ledger and not a
+counter column. The fix, when one is wanted, is a Postgres function doing the read and the
+write in one statement; that is a migration and a second place the rules would live, which is
+why it is not here yet.
 
 ## Blocking a first release
 
@@ -305,10 +407,18 @@ has never rendered. In priority order:
       something *stopped* happening — and both the server revoke and the client's optimistic
       subtraction had to come out for it to hold. Delete one somebody else unlocked too: their
       bonus must survive as well
-- [ ] **Unlock Monochrome for 40 paws.** The only purchasable row in the catalogue. Confirm the
-      wallet falls, the row flips to "Owned", and a second tap is refused with "You already
-      have that" rather than charging twice. Then confirm the filter is actually usable in
-      capture — `ownsEntry` is what that reads, and its new branch has never executed
+- [ ] **Unlock Monochrome for 40 paws, then use it.** Before buying: open the camera and
+      swipe to Monochrome — it must wear a padlock, slide back, and offer the shop. Then buy it:
+      the wallet falls, the row flips to "Owned", a second tap is refused with "You already have
+      that" rather than charging twice. Then go **straight back to the camera** — the padlock
+      must be gone without restarting the app, because ownership is refetched on focus and that
+      is the first time any of this path has ever run
+- [ ] **Golden Hour below rank 4.** It has always been rank-gated in the catalogue and was
+      never gated on the camera. A new account must now see it locked. This is a visible change
+      for every existing player below rank 4 — they had it, and now they do not
+- [ ] **Run out of free scores at capture.** Take a third photo on the free tier: the result
+      screen must say the photo is safe *or* can be revealed now, and offer "Reveal for 3 🐾".
+      With an empty wallet the refusal must be a neutral toast with a Shop button, not a red one
 - [ ] **The grant period rolls with no job running.** The only way to see it is to move
       `period_start` back a week in the SQL editor and reopen the app: `remaining` must return to
       7 and `period_start` must land a whole window on, not on `now()`. The arithmetic is tested
@@ -446,14 +556,25 @@ photographs, hit the padlock, tap the upsell, find a disabled button. Unchanged 
 - [ ] **`MAX_SIGHTINGS` is 300 and clustering happens client-side.** A dense area burns the cap
       on photographs that will be collapsed into one pin anyway. Not worth fixing until a real
       map is dense enough to notice, but that is where it would be felt
-- [ ] **23 npm advisories in the client, all in Metro and the Expo CLI.** Build tooling; none of
-      it ships in the binary. `npm audit fix` fixes zero of them, and `--force` wants
-      `expo@57` — three SDK majors, which would re-pin every native module in the app. **Leave
-      them.** Security patches arrive when you move SDK versions deliberately; the gate is
-      `npx expo install --check`, not `npm audit`. The server tree has zero advisories
-- [ ] **`babel-preset-expo` is declared twice** in `package.json` — `dependencies` at `~54.0.10`
-      and `devDependencies` at `~54.0.12`. Both currently resolve to 54.0.12, so nothing is
-      broken. It is a build-time preset and belongs in `devDependencies` alone
+- [ ] **16 npm advisories in the client, and two of them now ship in the binary.** This item
+      used to say "23, all in Metro and the Expo CLI, none of it ships, leave them" — and the
+      reason given for leaving them was that `npm audit fix --force` wanted `expo@57`. We are on
+      `expo@57` now, so that argument is spent and the list has changed shape.
+      Most are still dev-time tooling: `@expo/cli`, `@expo/config*`, `@expo/metro-config`,
+      `@expo/prebuild-config`, `xcode`, `@xmldom/xmldom`, `query-string`. Those still do not
+      reach a device and the gate for them is still `npx expo install --check`, not `npm audit`.
+      **The two that matter are `@react-navigation/core` and `@react-navigation/native`**, which
+      do ship. The fix is React Navigation 7 — see the item below. The server tree still has
+      zero advisories
+- [ ] **React Navigation is still on v6, and it is the last stale major in the tree.** SDK 57
+      did not move it: `expo install --fix` only manages packages Expo versions, and
+      `@react-navigation/*` is not one of them. It **bundles and typechecks** fine against RN
+      0.86 — the Hermes bundle built clean on 2026-09-28 — so nothing is broken today, but it is
+      unmaintained against this RN line and it is where the two shipping advisories live.
+      v6 → v7 renames a handful of APIs (`NavigationContainer` children, `screenOptions`
+      shapes, the `Screen` generic signature) and this project types every route centrally in
+      `navigation/types.ts`, which is the thing that makes it tractable. Do it as its own pass,
+      not folded into feature work
 
 ---
 
@@ -490,7 +611,9 @@ photographs, hit the padlock, tap the upsell, find a disabled button. Unchanged 
 10. **Which filters are paw-unlockable.** The mechanism is built and the default is off:
    `pawPrice: null` on a catalogue row means it cannot be bought with paws, and every entry
    carries that except the one worked example. Adding a filter never makes it buyable by
-   accident; deciding it should be is one line on that row. Two rules the code enforces and
+   accident; deciding it should be is one line on that row. **A new filter is two files** — its look in
+   `src/constants/filters.ts`, its row in `game/shop.ts` — and `check-shop.ts` fails if either
+   is missing, because each half on its own is a real bug (locked forever, or sold and invisible). Two rules the code enforces and
    you should not loosen: **nothing rank-gated** takes a paw price (it would empty out the
    visible record of having taken photographs), and **Pro never** does (it is the one entry
    that is not cosmetic).

@@ -427,13 +427,12 @@ export const socialApi = {
 export interface CatalogResponse {
   proActive: boolean;
   photographerRank: number;
-  /**
-   * The wallet, sent with the catalogue rather than fetched separately.
-   *
-   * Every purchasable row has to know whether its paw price is within reach, and a second
-   * request for that would mean two answers about one balance racing to render one screen.
+  /*
+   * No balance here on purpose. The shop's own wallet card reads `pawStore`, which is the one
+   * place a paw balance lives on this device — and the buy buttons are never gated on
+   * affordability, because a snapshot of a balance is not something to refuse a purchase on.
+   * The server decides that, and says why when it refuses.
    */
-  walletBalance: number;
   items: ShopItem[];
 }
 

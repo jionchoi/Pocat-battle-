@@ -19,6 +19,7 @@ import { RARITIES } from '../../constants/game';
 import type { Photo, Rarity } from '../../models';
 import { useAlbumStore } from '../../store/albumStore';
 import { useAuthStore } from '../../store/authStore';
+import { useShopRoute } from '../../hooks/useShopRoute';
 import { layout, spacing } from '../../theme';
 import type { AlbumStackParamList, MainTabParamList } from '../../navigation/types';
 import { FilterChips } from './FilterChips';
@@ -40,6 +41,7 @@ const COLUMNS = 2;
 
 export function PhotoAlbumGridScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
+  const openShop = useShopRoute();
 
   const photos = useAlbumStore((s) => s.photos);
   const phase = useAlbumStore((s) => s.phase);
@@ -213,7 +215,9 @@ export function PhotoAlbumGridScreen({ navigation }: Props) {
         onClose={() => setUpsellDismissed(true)}
         onOpenShop={() => {
           setUpsellDismissed(true);
-          navigation.navigate('ProfileTab', { screen: 'Shop' });
+          // Through `useShopRoute` for trap 11's `initial: false`. This navigated inline without
+          // it, so the shop became the profile stack's only screen and back went nowhere.
+          openShop();
         }}
         photoCount={photoCount}
         photoLimit={photoLimit ?? 0}
