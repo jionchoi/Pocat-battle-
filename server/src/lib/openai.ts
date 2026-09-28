@@ -54,6 +54,23 @@ export interface ScoredImage {
  * no score, and inventing a neutral one would put a number on a leaderboard that no model
  * ever gave — the row stays unscored and the player can spend another reveal on it.
  */
+/**
+ * Whether a scoring call is possible at all.
+ *
+ * Exported so the caller can ask *before* it commits anything to the photograph. `scorePhoto`
+ * answers the same question by throwing, but by then the attempt has been recorded — and an
+ * attempt is supposed to mean "a call was made", not "a call was wanted". The two read the
+ * same condition so they cannot drift.
+ *
+ * The stub counts as available on purpose: it produces a real verdict and the capture loop
+ * runs end to end on it, which is the whole reason it exists.
+ */
+export function scoringAvailable(): boolean {
+  if (config.SCORING_STUB) return true;
+
+  return Boolean(config.OPENAI_API_KEY && config.OPENAI_SCORING_MODEL);
+}
+
 export async function scorePhoto(image: Buffer): Promise<ScoredImage> {
   if (config.SCORING_STUB) return stubScore(image);
 
@@ -62,6 +79,12 @@ export async function scorePhoto(image: Buffer): Promise<ScoredImage> {
      * Refused rather than faked. A server with no scorer configured must not quietly
      * produce numbers — the photo stays unscored and revealable, which is exactly the
      * state the schema already has a shape for.
+     *
+     * Callers that meter attempts should test `scoringAvailable()` first: reaching this
+     * throw costs nothing, so charging a retry for it is charging for our own misconfiguration.
+     *
+     * Spelled out rather than calling that predicate, because this is also what narrows both
+     * values to `string` for the request below — a boolean helper tells the compiler nothing.
      */
     throw new HttpError(503, 'Scoring is not configured yet. Your photo is saved.');
   }
