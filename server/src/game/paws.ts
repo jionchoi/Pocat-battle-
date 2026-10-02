@@ -95,6 +95,10 @@ export type PawReason =
   | 'gift_undone'
   | 'purchase'
   | 'reveal'
+  // Keeping one photograph's map pin alive past the TTL. Its own reason rather than a
+  // `purchase`, because a purchase names a catalogue entry and this names a photograph — see
+  // 2026-09-29_map_pin_extension.sql.
+  | 'pin_extension'
   | 'challenge_prize';
 
 /* -------------------------------------------------------------------------- */
@@ -127,6 +131,60 @@ export type PawReason =
  * extra reveals at this price.
  */
 export const PAW_REVEAL_COST = 3;
+
+/* -------------------------------------------------------------------------- */
+/* Keeping a pin on the map                                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * What it costs to keep one photograph's pin on the map past the ordinary TTL.
+ *
+ * Priced against a reveal at `PAW_REVEAL_COST` (3) and deliberately below it. A reveal buys the
+ * player something for themselves and is the thing the economy is really for; an extension buys
+ * other people a pin they can still walk to, and a price that made a player choose between the
+ * two would mean nobody ever chose this.
+ *
+ * Mirrored by `PAW_CONFIG.pinExtensionCost` in the client's `src/constants/game.ts`, and
+ * `check-paws.ts` fails loudly if the two drift — the same arrangement the reveal cost has,
+ * because a client quoting a price the server will not honour is a client lying about money.
+ *
+ * Not researched, like every other number in this economy. See "Decisions waiting on you" in
+ * TODO.md: the supply is seven a week and the only way in is being given them, so every price
+ * here is really an exchange rate between generosity and getting things, and the way to find the
+ * right one is to play it.
+ */
+export const PAW_PIN_EXTENSION_COST = 2;
+
+/**
+ * How much longer one payment buys, in hours. 168 is a week.
+ *
+ * A week rather than a few days, because the thing being bought is *not having to think about
+ * this*. An extension that ran out in two days would put the player back in front of the same
+ * decision almost immediately, which turns a generous act into a subscription — and the
+ * notification that offers it (`src/lib/pinExpiry.ts`) would become the app nagging.
+ */
+export const PAW_PIN_EXTENSION_HOURS = 168;
+
+/**
+ * When a pin should expire after an extension is bought.
+ *
+ * Extends from whichever is later — what the pin already has, or now — so a second payment on a
+ * pin that is still live **adds** to it rather than resetting it to a week from today. Paying
+ * early must never be worse than paying late, or the app has taught the player to wait until the
+ * last moment.
+ *
+ * `current` is the existing `map_pin_until`, null when the photograph has never been extended.
+ * Note that a null does not mean "expired": an unextended pin is still live for
+ * `SIGHTING_TTL_HOURS` from capture, and this function deliberately does not know about that.
+ * Extending inside the free window therefore buys a week from now rather than a week from the
+ * end of it, which is a real (small) loss for paying early — and the alternative, reading
+ * `captured_at` in here, would make a pure function need a photograph.
+ */
+export function extendedPinUntil(current: string | null, now: Date = new Date()): string {
+  const from = current && new Date(current) > now ? new Date(current) : now;
+
+  return new Date(from.getTime() + PAW_PIN_EXTENSION_HOURS * 3600_000).toISOString();
+}
 
 /**
  * Whether a wallet covers a price.
@@ -248,23 +306,52 @@ export function chooseBucket(grantRemaining: number, walletBalance: number): Paw
  * about the *photograph* and are the same for every caller, where an empty balance is a fact
  * about the caller and is answered by `chooseBucket` returning null.
  *
- *   `not_found`  — no such photo, or it is not shared. One answer for both, matching
- *                  `votablePhoto` in `services/votes.ts`: telling them apart confirms that an
- *                  id somebody guessed names a real private photograph.
- *   `own_photo`  — yours. Refused for **both** buckets. Tipping yourself moves a paw between
- *                  your own pockets, which costs nothing and puts a number under your
- *                  photograph that says other people liked it.
+ *   `not_found`     — no such photo, or it is not shared. One answer for both, matching
+ *                     `votablePhoto` in `services/votes.ts`: telling them apart confirms that
+ *                     an id somebody guessed names a real private photograph.
+ *   `own_photo`     — yours. Refused for **both** buckets. Tipping yourself moves a paw between
+ *                     your own pockets, which costs nothing and puts a number under your
+ *                     photograph that says other people liked it.
+ *   `already_given` — you have already given this one a paw. One per photograph per player,
+ *                     which makes the button a state rather than a counter; see
+ *                     `PAW_GIFT_LIMIT_PER_PHOTO` below.
+ *
+ * `alreadyGiven` is passed in rather than read here, because this module has no database and is
+ * tested without one. The caller looks the row up; the rule about it lives here.
  */
-export type GiftRefusal = 'not_found' | 'own_photo';
+export type GiftRefusal = 'not_found' | 'own_photo' | 'already_given';
 
 export function refuseGift(
   viewerId: string,
-  photo: { ownerId: string; sharedToFeed: boolean } | null
+  photo: { ownerId: string; sharedToFeed: boolean } | null,
+  alreadyGiven = false
 ): GiftRefusal | null {
   if (!photo || !photo.sharedToFeed) return 'not_found';
   if (photo.ownerId === viewerId) return 'own_photo';
+  if (alreadyGiven) return 'already_given';
   return null;
 }
+
+/**
+ * How many paws one player may give one photograph.
+ *
+ * One, and this reverses the original design — which allowed any number, on the grounds that a
+ * paw is a tip rather than a verdict and giving moves nothing ranked. Both halves of that were
+ * true and it was still the wrong control.
+ *
+ * What it missed is that an uncapped button has no legible cost. A tap spends a paw out of a
+ * grant of `PAW_GRANT` per week, so a player who taps three times on one photograph has spent
+ * nearly half their week without deciding to — and the only way to discover the rate is to
+ * spend. Capping it makes the button a state, given or not given, exactly like a reaction, and
+ * makes `photos.paw_count` mean "how many people liked this" rather than "how many taps landed".
+ *
+ * The cap is **not** enforceable here or in `services/paws.ts`. It is a unique index —
+ * `paw_ledger_one_gift_per_photo`, see 2026-09-29_one_paw_per_photo.sql — because a spammed
+ * button fires concurrent requests that all read the same balance before any of them writes,
+ * and no read-then-write check in application code closes that gap without a transaction.
+ * This constant is the number the copy and the checks quote.
+ */
+export const PAW_GIFT_LIMIT_PER_PHOTO = 1;
 
 /* -------------------------------------------------------------------------- */
 /* The ledger                                                                 */

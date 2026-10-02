@@ -60,7 +60,13 @@ import { useAuthStore } from '../../store/authStore';
 import { usePawGift } from '../../hooks/usePawGift';
 import { usePhotoReaction } from '../../hooks/usePhotoReaction';
 import { useReactionStore } from '../../store/reactionStore';
-import { COMMUNITY_CONFIG, PAW_CONFIG, communityLabel } from '../../constants/game';
+import {
+  COMMUNITY_CONFIG,
+  MAP_CONFIG,
+  PAW_CONFIG,
+  communityLabel,
+} from '../../constants/game';
+import { pinExpiresAt, syncPinExpiryWarning } from '../../lib/pinExpiry';
 import { usePawStore } from '../../store/pawStore';
 import { isNoPaws, useShopRoute } from '../../hooks/useShopRoute';
 import {
@@ -136,6 +142,7 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
   const setShared = useAlbumStore((s) => s.setShared);
   const setSharedToMap = useAlbumStore((s) => s.setSharedToMap);
   const setShowcased = useAlbumStore((s) => s.setShowcased);
+  const extendMapPin = useAlbumStore((s) => s.extendMapPin);
   const remove = useAlbumStore((s) => s.remove);
   const pinDexPhoto = useAlbumStore((s) => s.pinDexPhoto);
   const unpinDexPhoto = useAlbumStore((s) => s.unpinDexPhoto);
@@ -151,6 +158,7 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [pinningDex, setPinningDex] = useState(false);
+  const [extendingPin, setExtendingPin] = useState(false);
   const [identifyOpen, setIdentifyOpen] = useState(false);
   const [identifying, setIdentifying] = useState(false);
   /**
@@ -404,6 +412,22 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
     };
   }, [photo]);
 
+  /**
+   * Keeps the local expiry warning in step with what this photograph actually says.
+   *
+   * Opening a photograph is the one moment the app is certain of its pin's real expiry: the row
+   * has just been fetched. The notification is scheduled on this device only, so it cannot know
+   * about a pin extended on another phone — and this is where that is repaired, silently, by
+   * rescheduling from the row in hand. See `src/lib/pinExpiry.ts`.
+   *
+   * Keyed on the three fields that can move the expiry rather than on `photo`, which is a new
+   * object on every caption keystroke.
+   */
+  useEffect(() => {
+    if (!photo) return;
+    void syncPinExpiryWarning(photo);
+  }, [photo?.id, photo?.mapPinUntil, photo?.sharedToMap, photo?.catNickname]);
+
   const saveCaption = useCallback(async () => {
     if (!photo) return;
 
@@ -577,6 +601,36 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
    */
   const pawWallet = usePawStore((s) => s.wallet);
   const openShop = useShopRoute();
+
+  /**
+   * Buys another week of pin, and says what happened in the same sentence as the price.
+   *
+   * Not optimistic — see `extendMapPin` on the album store. The paw balance is written by the
+   * store from the server's answer, so nothing here has to guess at money.
+   */
+  const keepPinUp = useCallback(async () => {
+    if (!photo) return;
+
+    setExtendingPin(true);
+    try {
+      const until = await extendMapPin(photo.id);
+      setPhoto({ ...photo, mapPinUntil: until });
+      showToast(`Pin kept up until ${formatPinDate(until)}`, 'success');
+    } catch (err) {
+      /*
+       * The server's own sentence when it sent one. Both refusals it can give name a thing the
+       * player can act on — an empty wallet, or a pin that is switched off — and a generic
+       * message would throw away which.
+       */
+      const message =
+        err instanceof Error && err.message ? err.message : 'We could not keep that pin up.';
+      showToast(message, isNoPaws(err) ? 'neutral' : 'error', isNoPaws(err) ? {
+        action: { label: 'Shop', onPress: openShop },
+      } : undefined);
+    } finally {
+      setExtendingPin(false);
+    }
+  }, [extendMapPin, openShop, photo, setPhoto]);
 
   /**
    * Whether revealing this photograph costs paws rather than a free score.
@@ -1248,6 +1302,26 @@ export function PhotoDetailScreen({ route, navigation }: Props) {
                 value={photo.sharedToMap}
                 onChange={() => void toggleSharedToMap()}
               />
+
+              {/*
+                How long the pin has left, and the way to give it more.
+
+                Only while the pin is on. With the switch off there is no expiry to state and
+                offering to extend nothing would be selling the player a week of invisibility —
+                the server refuses it for the same reason.
+
+                Under the switch rather than beside it, because it is a consequence of the switch
+                rather than a second decision of the same size: the toggle decides whether anybody
+                sees this, and this decides for how long.
+              */}
+              {photo.sharedToMap ? (
+                <PinLifeRow
+                  expiresAt={pinExpiresAt(photo)}
+                  extended={photo.mapPinUntil !== null}
+                  busy={extendingPin}
+                  onExtend={() => void keepPinUp()}
+                />
+              ) : null}
             </DividedGroup>
 
             {/*
@@ -1436,6 +1510,83 @@ const ToggleRow = React.memo(function ToggleRow({
     </View>
   );
 });
+
+/**
+ * How long this photograph's pin has left on the map, and the offer to extend it.
+ *
+ * ## Why this states a date rather than counting down
+ *
+ * "Until Thursday 3 October" is something a player can hold against what they know about the
+ * cat; "expires in 61 hours" is arithmetic they have to do before they can think about it. The
+ * decision being asked for is "is this cat still there", and a date is the form of the question
+ * that matches.
+ *
+ * ## The expired case is not an error
+ *
+ * A pin past its window is the ordinary end of a pin's life — see the TTL's rationale in
+ * `server/src/game/map.ts` — and it says so plainly, in muted text rather than in a warning
+ * colour. The owner has lost nothing: the photograph is in their album, it still holds its
+ * coordinates, and they can still see their own pin on their own map. What expired is other
+ * people's ability to walk to it, which is exactly what buying a week gives back.
+ */
+const PinLifeRow = React.memo(function PinLifeRow({
+  expiresAt,
+  extended,
+  busy,
+  onExtend,
+}: {
+  expiresAt: Date | null;
+  /** Whether paws have already been spent on this one. Changes the verb, not the price. */
+  extended: boolean;
+  busy: boolean;
+  onExtend: () => void;
+}) {
+  const expired = expiresAt !== null && expiresAt <= new Date();
+
+  return (
+    <View style={styles.pinLifeRow}>
+      <View style={styles.toggleText}>
+        <Text style={[text.body, { color: paper.text }]}>
+          {expired
+            ? 'The pin has come off the map'
+            : `On the map until ${expiresAt ? formatPinDate(expiresAt) : '—'}`}
+        </Text>
+        <Text style={[text.caption, { color: paper.textMuted }]}>
+          {expired
+            ? `Pins expire because a pin says where a cat is now. You can still see it on your own map. ${PAW_CONFIG.pinExtensionCost} paws puts it back for everyone for a week.`
+            : extended
+              ? `You are keeping this one up. ${PAW_CONFIG.pinExtensionCost} more paws adds another week onto the end.`
+              : `Pins last ${MAP_CONFIG.sightingTtlHours} hours, because a pin says where a cat is now. If this cat is still around, ${PAW_CONFIG.pinExtensionCost} paws keeps it up another week.`}
+        </Text>
+      </View>
+
+      <Button
+        label={expired ? 'Put it back' : 'Keep it up'}
+        variant="secondary"
+        compact
+        loading={busy}
+        onPress={onExtend}
+      />
+    </View>
+  );
+});
+
+/**
+ * A pin's expiry, as a player reads it.
+ *
+ * Weekday and date, no year and no time. The year is noise on something days away, and an exact
+ * time would imply a precision the TTL does not have — the pin is read out of the database when
+ * somebody opens the map, so it goes when it goes rather than at an announced minute.
+ */
+function formatPinDate(at: string | Date): string {
+  const date = typeof at === 'string' ? new Date(at) : at;
+
+  return date.toLocaleDateString(undefined, {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  });
+}
 
 const styles = StyleSheet.create({
   root: {
@@ -1673,6 +1824,21 @@ const styles = StyleSheet.create({
   toggleText: {
     flex: 1,
     gap: 1,
+  },
+  /**
+   * Like `toggleRow`, but aligned to the top and roomier.
+   *
+   * `alignItems: 'flex-start'` rather than `center`, because the hint here is three lines on a
+   * narrow phone and a vertically centred button beside three lines of text floats in the middle
+   * of the paragraph with nothing to line up against. Against the first line it reads as the
+   * answer to the sentence that names the price.
+   */
+  pinLifeRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    paddingVertical: spacing.sm,
   },
   actions: {
     marginTop: spacing.xxl,

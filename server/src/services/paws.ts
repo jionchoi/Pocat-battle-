@@ -139,7 +139,7 @@ async function settleGrant(userId: string): Promise<GrantPeriod> {
     });
 
     if (insertError) {
-      if (insertError.code !== '23505') throw insertError;
+      if (!isUniqueViolation(insertError)) throw insertError;
       return settleGrant(userId);
     }
 
@@ -210,11 +210,18 @@ export interface GiftResult {
 /**
  * `POST /photos/:photoId/paw` — one paw, from whichever bucket the rules pick.
  *
- * Multiple paws to one photograph are allowed and that is the feature: a paw is a tip, not a
- * verdict, and there is no honest reason to cap how many times somebody may say "this one is
- * good". It is only safe because **giving** moves nothing ranked — `paw_count` is a display
- * number and a gift touches no score, no XP and no leaderboard. The same act on `votes` is
- * capped at one per person precisely because that one *is* ranked.
+ * **One per photograph per player**, enforced by `paw_ledger_one_gift_per_photo`. This reverses
+ * the original rule, which allowed any number on the grounds that a paw is a tip rather than a
+ * verdict; `PAW_GIFT_LIMIT_PER_PHOTO` in `game/paws.ts` carries the argument for the change.
+ *
+ * Two guards, and both are needed. `giftablePhoto` reads the ledger and refuses cleanly, which
+ * is what answers a second tap minutes later. The unique index catches two taps racing, which a
+ * read cannot — and the `catch` below turns its violation into the same refusal, so the player
+ * cannot tell which one stopped them.
+ *
+ * The grant is decremented by a compare-and-swap **before** the gift is written, for the same
+ * reason: the previous ordering let a burst of taps each read the same `remaining` and each
+ * write the same decrement, which is how seven weekly paws paid for eleven gifts.
  *
  * (Spending a paw on a reveal does move XP; see the note in `game/paws.ts`. That is a
  * different act, deliberately, and it is capped by what a reveal costs rather than by a rule.)
@@ -235,14 +242,67 @@ export async function give(userId: string, photoId: string): Promise<GiftResult>
     throw new HttpError(409, 'You are out of paws.', 'no_paws');
   }
 
-  await writeMovement({
-    userId,
-    delta: -PAW_GIFT_SIZE,
-    reason: 'gift_sent',
-    bucket,
-    photoId,
-    counterpartyId: photo.owner_id,
-  });
+  /*
+   * The grant paw is taken **before** the gift is written, and taken conditionally.
+   *
+   * This is the fix for the overspend. `setGrantRemaining` used to be called after both ledger
+   * writes with `grant.remaining - 1` — a value read at the top of this function — so a burst of
+   * taps all read the same `remaining`, all decided they could afford it, and all wrote the same
+   * decremented number. Seven paws' worth of grant funded eleven gifts, and the eleventh only
+   * stopped because the requests had finally begun to serialize.
+   *
+   * `reserveGrantPaw` moves the read and the write into one statement whose `where` names the
+   * value it expects. Two requests cannot both match it, so the loser is told to look again.
+   * That is the only way to state "once" without a transaction — the same argument the unique
+   * index in 2026-09-29_one_paw_per_photo.sql makes for the per-photo cap.
+   *
+   * Taking it first means a failure after this point owes the player a paw back, which is what
+   * the `release` calls below are for. The alternative — write the gift, then try to pay for it
+   * — risks a gift nobody was charged for, and an unpaid gift cannot be detected later while an
+   * unspent reservation can.
+   */
+  let remainingAfter = grant.remaining;
+
+  if (bucket === 'grant') {
+    const reserved = await reserveGrantPaw(userId, grant.remaining);
+
+    if (reserved === null) {
+      /*
+       * Another request in the same burst took the paw this one had counted on. Refused rather
+       * than retried: a retry would make a spammed button *succeed* more often, which is the
+       * behaviour being removed. The client re-reads the balance on any refusal, so the next
+       * tap is decided against a true number.
+       */
+      throw new HttpError(409, 'You are out of paws.', 'no_paws');
+    }
+
+    remainingAfter = reserved;
+  }
+
+  try {
+    await writeMovement({
+      userId,
+      delta: -PAW_GIFT_SIZE,
+      reason: 'gift_sent',
+      bucket,
+      photoId,
+      counterpartyId: photo.owner_id,
+    });
+  } catch (err) {
+    /*
+     * A unique violation here is the per-photo cap, reached by a request that passed the check
+     * in `giftablePhoto` a moment before a sibling request wrote its row. It is the ordinary
+     * refusal, not a failure — so the reserved paw goes back and the player is told the same
+     * thing they would have been told had they arrived a moment later.
+     */
+    if (bucket === 'grant') await releaseGrantPaw(userId);
+
+    if (isUniqueViolation(err)) {
+      throw new HttpError(409, 'You have already given this photo a paw.', 'already_given');
+    }
+
+    throw err;
+  }
 
   /*
    * The owner's side. Always `wallet` regardless of where it came from — a received paw does
@@ -258,18 +318,14 @@ export async function give(userId: string, photoId: string): Promise<GiftResult>
     counterpartyId: userId,
   });
 
-  const remaining =
-    bucket === 'grant'
-      ? await setGrantRemaining(userId, grant.remaining - PAW_GIFT_SIZE)
-      : grant.remaining;
-
   const pawCount = await movePawCount(photoId, PAW_GIFT_SIZE);
 
   return {
     pawCount,
     bucket,
     balance: {
-      grant: { remaining, resetsAt: grantResetsAt(grant.periodStart) },
+      // Already decremented by the reservation above, rather than written here after the fact.
+      grant: { remaining: remainingAfter, resetsAt: grantResetsAt(grant.periodStart) },
       wallet: bucket === 'wallet' ? Math.max(0, wallet - PAW_GIFT_SIZE) : wallet,
     },
   };
@@ -289,17 +345,21 @@ export async function give(userId: string, photoId: string): Promise<GiftResult>
  * liked it. The client disables the control; anything reaching here has gone around it.
  */
 async function giftablePhoto(userId: string, photoId: string) {
-  const { data, error } = await supabase
-    .from('photos')
-    .select('id, owner_id, shared_to_feed')
-    .eq('id', photoId)
-    .maybeSingle<{ id: string; owner_id: string; shared_to_feed: boolean }>();
+  const [{ data, error }, alreadyGiven] = await Promise.all([
+    supabase
+      .from('photos')
+      .select('id, owner_id, shared_to_feed')
+      .eq('id', photoId)
+      .maybeSingle<{ id: string; owner_id: string; shared_to_feed: boolean }>(),
+    hasGiven(userId, photoId),
+  ]);
 
   if (error) throw error;
 
   const refusal = refuseGift(
     userId,
-    data ? { ownerId: data.owner_id, sharedToFeed: data.shared_to_feed } : null
+    data ? { ownerId: data.owner_id, sharedToFeed: data.shared_to_feed } : null,
+    alreadyGiven
   );
 
   if (refusal === 'not_found') {
@@ -310,7 +370,39 @@ async function giftablePhoto(userId: string, photoId: string) {
     throw new HttpError(409, 'You cannot give paws to your own photo.', 'own_photo');
   }
 
+  if (refusal === 'already_given') {
+    throw new HttpError(409, 'You have already given this photo a paw.', 'already_given');
+  }
+
   return data!;
+}
+
+/**
+ * Whether this player has already given this photograph a paw.
+ *
+ * The ordinary path for the per-photo cap, and it is only the *ordinary* path: it is a read, so
+ * a second tap arriving before this one's write lands will pass it. The unique index is what
+ * actually holds, and `give` translates its violation into the same refusal this produces.
+ *
+ * Both exist because they answer different questions. This one answers "is the button already
+ * spent", which is almost always true or false long before the tap and deserves a clean 409
+ * rather than a caught database error. The index answers "did two taps race", which is rare.
+ *
+ * Served by `paw_ledger_photo_idx` — `(photo_id, user_id, created_at desc)` — so it is an index
+ * lookup rather than a scan of the player's history.
+ */
+async function hasGiven(userId: string, photoId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('paw_ledger')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('photo_id', photoId)
+    .eq('reason', 'gift_sent')
+    .limit(1);
+
+  if (error) throw error;
+
+  return (data ?? []).length > 0;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -351,8 +443,8 @@ export async function spendFromWallet(
   userId: string,
   spend: {
     cost: number;
-    reason: Extract<PawReason, 'purchase' | 'reveal'>;
-    /** The photograph a reveal was bought for. Null on a catalogue unlock. */
+    reason: Extract<PawReason, 'purchase' | 'reveal' | 'pin_extension'>;
+    /** The photograph a reveal or a pin extension was bought for. Null on a catalogue unlock. */
     photoId?: string | null;
     /** The catalogue id a purchase bought. Null on a reveal. */
     entryId?: string | null;
@@ -428,6 +520,82 @@ async function writeMovement(movement: {
  * overspend unrepresentable; this is what makes the failure a clamped number rather than a
  * 500 on a tap, if the read-then-write above ever races another request for the same player.
  */
+/**
+ * Takes one paw out of the grant, but only if it still says what the caller was told.
+ *
+ * Compare-and-swap, and the `eq('remaining', expected)` is the whole point: PostgREST gives no
+ * transaction, so the only atomic thing available is a single statement whose `where` carries
+ * the assumption. Postgres takes a row lock for the update, so of two concurrent callers
+ * holding the same `expected`, exactly one matches a row and the other matches none.
+ *
+ * Answers the new remaining, or null when somebody else moved it first.
+ *
+ * `select('remaining')` rather than a bare update, because "how many rows did that touch" is
+ * the signal being read and PostgREST only reports it by returning them.
+ */
+async function reserveGrantPaw(userId: string, expected: number): Promise<number | null> {
+  if (expected < PAW_GIFT_SIZE) return null;
+
+  const next = expected - PAW_GIFT_SIZE;
+
+  const { data, error } = await supabase
+    .from('paw_grants')
+    .update({ remaining: next })
+    .eq('user_id', userId)
+    .eq('remaining', expected)
+    .select('remaining');
+
+  if (error) throw error;
+
+  return (data ?? []).length === 1 ? next : null;
+}
+
+/**
+ * Puts a reserved paw back, for a gift that then could not be written.
+ *
+ * Read-then-write, unavoidably — the value to restore depends on whatever the row says now,
+ * which other requests may have moved since the reservation. That makes this the one place a
+ * concurrent burst can still lose a paw: two simultaneous releases can both read the same
+ * number and both write the same increment, crediting one paw where two were owed.
+ *
+ * Accepted, because it can only fire on the path where a gift was *refused* — the player is
+ * being told nothing happened, and the failure mode is that one of their paws stays spent. That
+ * is the safe direction to be wrong in, and it is recorded: the ledger has no `gift_sent` row
+ * for it, so the discrepancy is visible rather than silent. Minting a paw that nobody's ledger
+ * accounts for would not be.
+ *
+ * Clamped by `setGrantRemaining`, so a release can never push the grant above `PAW_GRANT`.
+ */
+async function releaseGrantPaw(userId: string): Promise<void> {
+  try {
+    const { data, error } = await supabase
+      .from('paw_grants')
+      .select('remaining')
+      .eq('user_id', userId)
+      .maybeSingle<{ remaining: number }>();
+
+    if (error || !data) return;
+
+    await setGrantRemaining(userId, data.remaining + PAW_GIFT_SIZE);
+  } catch {
+    // Best effort. The gift is already being refused and the player is being told so; failing
+    // the refusal itself because the refund could not be written would replace a lost paw with
+    // an error about a tap that correctly did nothing.
+  }
+}
+
+/**
+ * Whether an error is Postgres's "that row already exists".
+ *
+ * `23505` is `unique_violation`. Read in two places here — the first-grant insert race in
+ * `settleGrant` and the per-photo gift cap — and both treat it as a fact about the world rather
+ * than a fault: the row that was wanted exists, which is the outcome, just written by somebody
+ * else.
+ */
+function isUniqueViolation(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23505';
+}
+
 async function setGrantRemaining(userId: string, remaining: number): Promise<number> {
   const clamped = Math.max(0, Math.min(PAW_GRANT, remaining));
 

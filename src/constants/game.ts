@@ -244,6 +244,33 @@ export const PAW_CONFIG = {
    * that teaches nobody.
    */
   giftToastMs: 5_000,
+  /**
+   * What keeping one photograph's map pin alive costs in paws.
+   *
+   * Mirrors `PAW_PIN_EXTENSION_COST` in `server/src/game/paws.ts`, which is the copy that
+   * charges; `check-paws.ts` asserts the two agree, for the same reason it does for the reveal
+   * price.
+   */
+  pinExtensionCost: 2,
+  /**
+   * How much longer one payment buys, in hours. Mirrors `PAW_PIN_EXTENSION_HOURS`.
+   *
+   * Used only to word the button — "keeps it up another week" — so a change on the server that
+   * did not land here would be wrong copy rather than a wrong charge. Asserted anyway.
+   */
+  pinExtensionHours: 168,
+  /**
+   * How long before a pin expires to warn the owner, in hours.
+   *
+   * Client-only: nothing on the server schedules this and there is no push involved. It is the
+   * lead time on the local notification in `src/lib/pinExpiry.ts`.
+   *
+   * Twelve hours, so the warning lands the evening before rather than in the last minutes of a
+   * pin's life. A notification about something that has effectively already happened is a
+   * notification that can only annoy — and the whole point of it is that there is still time to
+   * act on it.
+   */
+  pinExpiryWarningHours: 12,
 } as const;
 
 /** Community score as a percentage string, or null when it is not yet meaningful. */

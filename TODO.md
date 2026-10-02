@@ -1,13 +1,17 @@
 # Cat Frame — what is left
 
-Rewritten **2026-08-24**, for a session starting cold. Previous revision: 2026-08-14.
+Rewritten **2026-08-24**, for a session starting cold. Revised **2026-09-29**. Previous
+revisions: 2026-09-28, 2026-08-14.
 
 `BACKEND.md` is the reference: what was built, and *why* each load-bearing decision went the way
 it did. This file is the action list. Where the two disagree, check the code — and where either
 makes a claim about the live project, verify it rather than believing it. That is the lesson of
 the 2026-08-14 session, when the migration list in `BACKEND.md` was maintained by hand and was
-wrong, and it was re-learned on 2026-08-24: **this file said "write the rubric" for ten days
-after the rubric had been written.**
+wrong; it was re-learned on 2026-08-24, when **this file said "write the rubric" for ten days
+after the rubric had been written**; and again on 2026-09-29, when it spent a month describing
+four applied migrations as unapplied and **every reveal as answering a 500**. The failure mode
+flips direction but never goes away: a hand-maintained claim about the live project is wrong by
+default. Probe first.
 
 ```bash
 npm install && (cd server && npm install)                       # neither tree is installed cold
@@ -17,7 +21,7 @@ for f in scripts/check-*.ts; do npx tsx "$f" >/dev/null && echo "ok $f" || echo 
 npx tsc --noEmit && cd .. && npx tsc --noEmit                   # both trees
 ```
 
-Last run 2026-09-28: **both trees clean, all 12 checks pass**, client on SDK 57 with
+Last run 2026-09-29: **both trees clean, all 12 checks pass**, client on SDK 57 with
 `expo-doctor` 21/21 and a clean iOS bundle. (`TESTING.md` §1 said "nine
 scripts" for a fortnight after there were eleven; it now says twelve and lists twelve, which is
 what `ls server/scripts/check-*.ts` reports.)
@@ -26,28 +30,41 @@ what `ls server/scripts/check-*.ts` reports.)
 
 ## Where things actually stand
 
-**The schema is no longer complete.** Eleven migrations were applied and confirmed by probe on
-2026-08-14, and trap 17 — any player granting themselves Pro — is closed. **Two migrations have
-been written since that probe, and nothing here records either as applied:**
+**The schema is almost complete.** `node scripts/schema-state.mjs` reported **17 of 17 probeable
+migrations applied on 2026-09-29**, including the whole paw economy and `reveal_attribution`.
+Trap 17 — any player granting themselves Pro — is closed. Everything this file said for a month
+about reveals and paw endpoints answering 500 was **stale**, and it was stale in the direction
+that wastes the most time: it described working code as broken.
 
-- `2026-08-28_five_reactions.sql` — widens `votes.reaction` from three kinds to five. Unapplied,
-  a tap on 🥹 or 🔥 is a check-constraint violation and a 500.
-- `2026-08-29_paws.sql` — the paw economy, giving half. Definitely unapplied: written in the
-  same session as this line and never run. Until it is, `GET /paws/balance` and every paw
-  button answer a 500 about a missing relation.
-- `2026-08-30_paw_spending.sql` — the spending half: `entitlements`, `paw_ledger.entry_id`, and
-  a widened reason enum. Same session, also never run. Until it is, `POST /shop/unlock` and
-  every paw-funded reveal answer a 500.
-- `2026-08-31_reveal_attribution.sql` — `photos.revealed_by`, plus a backfill setting it to
-  `owner_id` on every already-scored row. Same session, never run. Until it is, **every reveal
-  answers a 500**, including free ones on your own photos — the score write now stamps this
-  column.
+**Three migrations are unapplied. Two were written on 2026-09-29; the first has been
+outstanding since August:**
 
-**Probe before believing any of this** — `node scripts/schema-state.mjs`, which now carries
-probes for the paw tables. It cannot see `2026-08-28_five_reactions.sql`: that migration widens
-a check constraint and creates nothing to select, so the only probe would be a write, and the
-script is deliberately read-only. Run whatever is missing in the Supabase SQL editor, in date
-order. A hand-maintained list of what is applied is exactly what was wrong on 2026-08-14.
+- `2026-08-28_five_reactions.sql` — widens `votes.reaction` from three kinds to five. **This one
+  is old and was never run.** Confirmed by behaviour rather than by probe: 🥹 and 🔥 answer a
+  check-constraint violation on a real device, where ❤️ 🤣 😮 work. `services/votes.ts` now
+  catches the 23514 and logs the migration filename, so the next person to hit it is told what to
+  run instead of reading a 500.
+- `2026-09-29_one_paw_per_photo.sql` — the per-photograph paw cap. **It deletes rows**, which is
+  the one place the ledger's append-only rule is broken on purpose: a unique index cannot be
+  created over rows that already violate it, and the duplicates are gifts the overspend race
+  invented. Read its header before running it.
+- `2026-09-29_map_pin_extension.sql` — `photos.map_pin_until` and the `pin_extension` ledger
+  reason. Until it runs, `POST /photos/:id/map-pin` answers a 500 about a missing column and the
+  pin row on Photo Detail prices something the server cannot sell.
+
+**Probe before believing any of this** — `node scripts/schema-state.mjs`. It cannot see
+`2026-08-28_five_reactions.sql` or the reason-enum half of the pin migration: both widen check
+constraints and create nothing to select, so the only probe would be a write and the script is
+deliberately read-only. For the reaction one, the read-only answer is:
+
+```sql
+select conname, pg_get_constraintdef(oid) from pg_constraint where conrelid = 'votes'::regclass;
+```
+
+Run whatever is missing in the Supabase SQL editor, in date order. A hand-maintained list of
+what is applied is exactly what was wrong on 2026-08-14, and **this section was wrong again on
+2026-09-29 in the opposite direction** — it claimed four migrations were unapplied when all four
+had been run. Probe, then edit this paragraph.
 
 **The rubric is written.** `server/src/game/scoring.ts` carries a full rubric with bands tied to
 the client's Rare/Epic/Legendary thresholds, badge and trait instructions, and an anti-injection
@@ -55,12 +72,104 @@ clause sent as a system message. `SCORING_VERSION` is `2026-08-13.1`. The "THIS 
 WRITE" banner still sits above it, which is what made this look unstarted. **It is not
 unwritten — it is unapproved.**
 
-**Still almost nothing has been watched running.** Observed against real data: the capture loop
-on a phone (2026-08-12), one anonymous `/feed/viral` read (2026-08-13). Everything shipped on
-2026-08-24 typechecks and has never rendered on a device. `BACKEND.md` §4 is the honest ledger.
-**"Typechecks" is not "works".**
+**Some of it has now been watched running, and it immediately paid for itself.** Observed
+against real data: the capture loop on a phone (2026-08-12), one anonymous `/feed/viral` read
+(2026-08-13), and on **2026-09-29** a real session covering the camera, the filter rail, the
+reaction tray, the paw button and the map. That session found six bugs — see the section below —
+and **five of the six were invisible to every tool in the verification block above.** A race, a
+native view hierarchy, a text rasterization artefact, an expiry rule that contradicted its own
+endpoint's documented purpose, and a screen that never stated the state it was in. None of them
+is the kind of thing a typecheck or a pure-rules check can reach.
+
+The remaining untested surface is still large: the whole Dex and matching path, challenges, the
+map clustering and story stack, the reveal ledger refund, and every paw spend. `BACKEND.md` §4
+is the honest ledger. **"Typechecks" is not "works" — and the 2026-09-29 session is the
+evidence, not the counterexample.**
 
 ---
+
+## Shipped 2026-09-29 — six bugs found by the first real session on a device
+
+The first time anybody drove the app on a phone against live data, and it is worth saying what
+that bought: every one of these had typechecked and passed its checks for weeks. Five of the six
+were invisible to every tool in the verification block at the top of this file.
+
+- **Toasts were invisible over the camera and the reveal.** `Capture` and `ScoreResult` are
+  `presentation: 'fullScreenModal'`, which on iOS is a separate native view controller presented
+  above the React root — so the single `ToastHost` in `App.tsx`, a sibling of `<RootNavigator />`,
+  rendered *behind* them. `zIndex: 100` cannot help; the two views are not in the same hierarchy
+  for it to order them within. The symptom was not a missing toast but a **late** one:
+  "Golden Hour is locked." fired when the rail slid back, sat invisible for its five seconds, and
+  appeared the instant the modal was dismissed — looking like it belonged to the screen the
+  player had just arrived at. `Toast.tsx` now keeps a **stack** of hosts and delivers to the
+  newest, and both modal screens mount one as their last child. This also un-hid every other
+  toast on those two screens: failed captions, pinned Dex tiles, refused paws
+- **A spammed paw button spent eleven paws out of a grant of seven.** A read-modify-write race:
+  `give()` read `remaining`, chose a bucket, wrote the ledger, then wrote
+  `setGrantRemaining(grant.remaining - 1)` using the value read at the top — so every request in
+  a burst read 7, each believed it could afford it, and each wrote 6. It only stopped at eleven
+  when the requests began serializing. The client made it worse rather than catching it: each
+  response called `apply(result.balance)`, so stale server balances overwrote the optimistic
+  decrements. Now `reserveGrantPaw` does the read and the write in **one statement whose `where`
+  names the expected value**, so of two concurrent callers exactly one matches a row
+- **A paw is now one per photograph per player**, which is a reversal — `services/paws.ts` argued
+  at length that any number should be allowed, since a paw is a tip rather than a verdict and
+  giving moves nothing ranked. Both halves of that were true and it was still the wrong control:
+  an uncapped button has no legible cost, so the only way to find out what a tap spends is to
+  tap. `PAW_GIFT_LIMIT_PER_PHOTO` carries the full argument. **Enforced as a unique index, not in
+  the service** — no read-then-write check closes the race without a transaction, and PostgREST
+  gives none, so the service catches the 23505 and turns it into the ordinary refusal
+- **The reaction tray arrived blurred for about a second.** `scale: 0.5 + 0.5 * enter.value` on an
+  `Animated.Text`. A transform does not re-lay-out text: the glyph is rasterized once at its
+  layout size and the bitmap is stretched, so scaling up from half size draws an emoji at half
+  resolution and magnifies it. Emoji are the worst case — colour bitmap glyphs, with no vector to
+  re-render from. The tray container was *also* scaling 0.86 → 1, so the first face was magnified
+  twice over. Both now animate opacity and `translateY`, which resamples nothing. **The rule worth
+  keeping: never scale a view containing text up from below 1.**
+- **The reveal did not say whether the photo was public, and now it asks.** `shared_to_feed`
+  defaults to false, so nothing was ever auto-posted — but a reveal has the visual grammar of a
+  publication (a score, a tier crest, badges, full bleed), and with "Share to feed" beside "Save
+  to Album" and no statement of the current state, the honest reading is that the photo is already
+  out and that button shares it somewhere *else*. A line now states the state, and a sheet asks
+  once **on the way out**. Deliberately not over the reveal: this screen's rule is that a player
+  who only wanted the number is not made to answer anything, and the back arrow is documented as
+  the door that costs nothing. Skipped entirely for anyone who already posted or pressed Save to
+  Album
+- **Your own map pins expired after 72 hours**, which contradicted the endpoint's own reason for
+  being authenticated — `routes/map.ts` says the map's most valuable case is finding your way back
+  to a cat *you* photographed, which is why your pins come back at true coordinates. The cutoff
+  was applied before the viewer was considered, so that case expired on a timer and "My photos"
+  could only ever show three days. Liveness is now three ways in one `or`: **you own it**, it is
+  inside the TTL, or somebody paid to keep it. The empty-state copy also named the TTL, because
+  "No sightings nearby" was shown both for "nobody has been here" and "the pins aged out" — which
+  is what made an empty map read as broken software
+
+## Shipped 2026-09-29 — paw stamps: keeping a map pin alive
+
+The first thing paws buy that **another player receives**. Everything else they buy is cosmetic
+or a shortcut past a wait; a pin kept alive is a pin somebody else can still walk to, which makes
+it the right sink for a currency whose supply comes from being *given* paws.
+
+- **`POST /photos/:photoId/map-pin`** — `PAW_PIN_EXTENSION_COST` (2) for
+  `PAW_PIN_EXTENSION_HOURS` (168). Wallet-only, through `spendFromWallet`, like every other spend
+- **`photos.map_pin_until` is service-role only** and deliberately *not* on the column grant the
+  other four owner-editable fields share. A player who could write it would extend pins for free —
+  the same shape as trap 17. This is why it is a POST of its own rather than a field on
+  `PATCH /photos/:id`: that handler is the free fields, and folding a priced write into it would
+  put a spend behind the same door as editing a caption
+- **`extendedPinUntil` adds to whatever the pin already has**, rather than resetting to a week
+  from today, so paying early is never worse than paying late. Tested in `check-paws.ts`
+- **It buys duration, never position.** No `community_score`, no `featured`, no coarsening
+  change. The only thing money moves is *how long*
+- **A local notification 12 hours before expiry** (`src/lib/pinExpiry.ts`), offering the
+  extension and naming the price. Local rather than push, for the reason the paw grant settles
+  lazily instead of on a cron: the expiry is arithmetic on a row the client already has, so a
+  push would mean a scheduled job walking every photograph to recompute what each device can work
+  out for itself. The cost is that it does not follow the player to a second phone — reopening the
+  photograph reschedules it from the row in hand
+
+**None of this has run against a real database.** The migration is unapplied; see the top of this
+file. The pure arithmetic is covered by `check-paws.ts` and nothing else here has executed.
 
 ## Shipped 2026-09-28 — Expo SDK 54 → 57, so the app runs on a real iPhone again
 
@@ -105,18 +214,23 @@ chosen, and it turned out far cheaper than the old Parked note feared.
   finds the dev server on its own, but **the server has to be running** for anything with paws
   in it
 
-## Shipped 2026-08-31 — the paw economy. **None of it has run against a real database**
+## Shipped 2026-08-31 — the paw economy. **Partly exercised on a device 2026-09-29**
 
 Paws are the in-app currency. A player can now give one to somebody else's photograph, drawn
 from a weekly grant that expires and falling through to a permanent wallet when the grant runs
 out. **Giving only, and a gift is final** — see "Deliberately unbuilt" for what spending still
 needs.
 
-Say the honest thing first, because the rest of this section reads like a feature that works:
-**every line of this typechecks and none of it has executed.** The migration has never been
-run — `2026-08-29_paws.sql` is not on the live project, so `GET /paws/balance` currently answers
-a 500 about a missing relation, and it is the first thing to do. Nothing has rendered on a
-device. "Typechecks" is not "works".
+**Updated 2026-09-29.** This section said "none of it has executed" and that the migration had
+never been run; both were wrong by then. `2026-08-29_paws.sql` **is** applied — confirmed by
+probe — and giving has been driven on a phone. What that session found is the overspend race
+described at the top of this file, which is the sharpest available illustration of why the
+caveat in this header was worth writing even though its facts had gone stale: the code
+typechecked, `check-paws.ts` passed, the migration was applied, and the feature was still wrong
+in a way only a thumb could find.
+
+Still unexercised here: the grant period rolling, the wallet fallback at the eighth gift, and
+every refusal except `own_photo`.
 
 - **`server/migrations/2026-08-29_paws.sql`** — `paw_grants` (one row per player, settled
   lazily on read), `paw_ledger` (append-only; the wallet balance is `sum(delta)` over its
@@ -168,12 +282,16 @@ device. "Typechecks" is not "works".
   changes a score" is printed on the shop header and promised on both profile screens, and free
   reactions remain the only ranking input
 
-## Shipped 2026-08-31 — spending paws. **Also never run against a real database**
+## Shipped 2026-08-31 — spending paws. **Migration applied; nothing here has executed**
 
 The second half of the economy, added in the same session after the giving half. Paws now buy
-two things. **Everything below typechecks and nothing has executed** — the same caveat as the
-section above, and `2026-08-30_paw_spending.sql` has to be run by hand before any of it answers
-anything but a 500.
+two things — three, since the map pin extension shipped on 2026-09-29.
+
+**Updated 2026-09-29.** `2026-08-30_paw_spending.sql` **is** applied; this section claimed
+otherwise for a month. What remains true is the part that matters: **no paw has ever been
+spent.** Not a reveal, not an unlock, not an extension. Giving has run on a device and spending
+has not, so `spendFromWallet` — the single path every purchase goes through — has never
+executed against a real wallet.
 
 - **`2026-08-30_paw_spending.sql`** — `entitlements` (the table `ownsEntry` had been waiting
   on since it was written), `paw_ledger.entry_id` so a purchase row says what it bought, and
@@ -346,6 +464,23 @@ why it is not here yet.
 
 These are the release. Nothing below this section matters until they are done.
 
+### 0. Run the three unapplied migrations
+
+Five minutes, and it comes first because two of the things shipped on 2026-09-29 answer a 500
+until it is done — and because one of these has been outstanding since August while the app
+quietly offered two reactions the database would not accept.
+
+- [ ] `2026-08-28_five_reactions.sql` — until this runs, 🥹 and 🔥 fail. Verify with the
+      `pg_constraint` query at the top of this file rather than by trusting this line
+- [ ] `2026-09-29_one_paw_per_photo.sql` — **read its header first.** It deletes duplicate
+      ledger rows, which is deliberate and explained, and it will not create its index until
+      they are gone
+- [ ] `2026-09-29_map_pin_extension.sql` — until this runs, `POST /photos/:id/map-pin` answers a
+      500 about a missing column
+- [ ] Then `node scripts/schema-state.mjs` again, and **edit "Where things actually stand"** to
+      say what it reported. That paragraph has now been wrong in both directions; it is only
+      worth having if it is rewritten from a probe
+
 ### 1. Approve the rubric and turn the scorer on
 
 - [ ] **Read `SCORING_RUBRIC` and accept or edit it.** It is the game's taste and a previous
@@ -383,13 +518,58 @@ has never rendered. In priority order:
       look at a photo the model already rejected has never executed
 - [ ] **A feed photo end to end** — open somebody else's card and confirm no owner controls, no
       Dex row, a read-only caption, and that reactions work
-- [ ] **Give a paw, seven times.** After running `2026-08-29_paws.sql`. Nothing in the economy
-      has ever executed, and the sequence worth watching is: the count moves in the same frame,
-      the toast says "6 left this week", and the *eighth* gift says "from your wallet" (or
-      "You are out of paws" with a Shop route, on an empty wallet). **There is nothing to undo**
-      — confirm a given paw stays given. Then confirm the paw button is dead on your own
-      photograph: that was the bug the wiring fixed, and the server refusing it is the backstop
-      rather than the fix
+- [ ] **Give a paw to seven different photographs.** Rewritten 2026-09-29: it used to say "seven
+      times" on one photo, which is no longer a thing that can happen. One paw per photograph
+      now, so the allowance can only be walked down across seven *cards*. The sequence worth
+      watching: the count moves in the same frame, the toast says "6 left this week", and the
+      *eighth* gift says "from your wallet" (or "You are out of paws" with a Shop route, on an
+      empty wallet). **There is nothing to undo** — confirm a given paw stays given. Then confirm
+      the paw button is dead on your own photograph: that was the bug the wiring fixed, and the
+      server refusing it is the backstop rather than the fix
+- [ ] **Spam the paw button on one photograph.** After running
+      `2026-09-29_one_paw_per_photo.sql`. This is the regression test for the overspend, and it is
+      the most valuable test in this list because it is checking a **concurrency** fix that no
+      check script can reach: `check-paws.ts` tests the arithmetic, and the bug was never in the
+      arithmetic. Tap as fast as possible. The first tap must land and every later one must do
+      nothing at all — no toast, no second count, and the grant down by exactly **one**. Then
+      check `paw_ledger` has one `gift_sent` row for that photo and the recipient has one
+      `gift_received`
+- [ ] **Give a paw, then reinstall (or clear the app's storage) and open the same photograph.**
+      The one path that exercises the `already_given` refusal rather than the local guard:
+      `givenByPhotoId` is gone, so the button offers a tap, the server refuses it, and
+      `markGiven` has to put the given state back without moving either balance. Confirm the
+      wallet and grant are unchanged afterwards
+- [ ] **Keep a pin up for 2 paws.** After running `2026-09-29_map_pin_extension.sql`. On Photo
+      Detail with the map switch **on**: the row states a date, the button charges the wallet
+      once, and the date moves a week out. Then turn the map switch off and confirm the row
+      disappears rather than offering to extend an invisible pin — the server refuses it with
+      `not_on_map`, and the row not being there is the fix rather than the refusal. Buy a second
+      week on a pin that is still live and confirm the date **adds** rather than resetting to a
+      week from today
+- [ ] **An expired pin of your own.** The Edmonton and Korea captures are all months old, so this
+      needs no setup: open one on the map's "My photos" layer and it must be **there** — own pins
+      no longer expire. Its Photo Detail row must read "The pin has come off the map" with "Put it
+      back", and that sentence must not read as an error, because it is not one
+- [ ] **The expiry notification.** Needs notification permission granted in Settings first, and
+      it is the one test here that cannot be hurried: the warning is scheduled 12 hours before
+      expiry, so the only way to see it is to extend a pin and then move `map_pin_until` back in
+      the SQL editor to within 12 hours of now, reopen the photograph — which reschedules from the
+      row — and wait. Worth doing once: a notification that routes to a deleted photograph, or one
+      that fires for a pin already down, are both states `syncPinExpiryWarning` claims to prevent
+      and nothing has verified
+- [ ] **A toast raised over the camera and over the reveal.** The fix for the invisible-toast bug,
+      and the cheapest test in this list: swipe to a locked filter on the camera and confirm
+      "Golden Hour is locked." appears **while the camera is still open**, not after it closes.
+      Then do the same on the reveal — pin a Dex photo, or refuse a paw — and confirm the toast
+      lands over the photograph. Also confirm a toast raised from an ordinary screen still works,
+      which is what the host stack could plausibly break
+- [ ] **Open the reaction tray and look at the first face.** It must be sharp from the first
+      frame. This is a watch-it-once test rather than a pass/fail assertion, and it is the only
+      kind available for a rendering bug
+- [ ] **Leave the reveal without posting.** The sheet must ask once, "Keep it private" must leave
+      immediately, and pressing back a second time must **not** ask again. Then post one and
+      confirm the sheet is skipped entirely on the way out, and that the line above the buttons
+      reads "This photo is in the feed."
 - [ ] **Reveal your own photo once the free scores are gone.** Score twice, then open a third
       unscored photo: the button must read "Reveal for 3 🐾" rather than "Reveal the score",
       and the line under it must say what the wallet has left. Confirm afterwards that the free
@@ -496,10 +676,11 @@ photographs, hit the padlock, tap the upsell, find a disabled button. Unchanged 
       made on `votes.reaction`. Do not build it as a column on `challenge_entries` without
       reading why it is a bucket
 - [ ] **`POST /map/sightings`** — a bare report with no photograph. It needs a table, and
-      `mapApi.report` **still has no caller anywhere in the app**: the MapScreen empty state
-      says "Log the first one" at `MapScreen.tsx:262` over a card with `pointerEvents: none` and
-      no button. **Add the control first, or drop the copy.** Building the endpoint does not
-      make the button exist
+      `mapApi.report` **still has no caller anywhere in the app**. The copy half of this is
+      **resolved as of 2026-09-29**: the empty state said "Log the first one" over a card with
+      `pointerEvents: none` and no button, and it now explains the pin TTL instead — so the app
+      no longer offers something that does not exist. What remains is only the endpoint, and it
+      is still unbuilt on purpose. **Building it does not make the button exist**
 
 ---
 
@@ -540,7 +721,10 @@ photographs, hit the padlock, tap the upsell, find a disabled button. Unchanged 
       streak payout and no prize — `challenge_prize` sits in the ledger's reason enum unwritten.
       Worth deciding once giving has been watched running, not before: the supply is seven a
       week and adding a second source before anybody has spent the first is guessing
-- [ ] **Push notifications.** The token column and `PUT /auth/push-token` exist; nothing sends
+- [ ] **Push notifications.** The token column and `PUT /auth/push-token` exist; nothing sends.
+      Still true for *push* — the one notification the app now schedules is **local**, and
+      `src/lib/pinExpiry.ts` argues for why a derivable expiry does not need a server to
+      announce it. Read that before building a push for anything a device can work out itself
 - [ ] **Real shop product ids.** The ones in `game/shop.ts` are placeholders and must match App
       Store Connect and the Play Console before purchasing is built. Price labels are static
       strings where a real IAP would show the store's own localised price
@@ -555,7 +739,12 @@ photographs, hit the padlock, tap the upsell, find a disabled button. Unchanged 
       ever returns. Delete it only if you have decided that is never happening
 - [ ] **`MAX_SIGHTINGS` is 300 and clustering happens client-side.** A dense area burns the cap
       on photographs that will be collapsed into one pin anyway. Not worth fixing until a real
-      map is dense enough to notice, but that is where it would be felt
+      map is dense enough to notice, but that is where it would be felt. **It got slightly more
+      likely on 2026-09-29**: the viewer's own pins no longer expire, so a player who has
+      photographed one street for a year has a permanently growing number of rows inside any box
+      covering it. The ordering is `captured_at desc`, so what the cap drops is their *oldest*
+      captures rather than anybody's fresh ones — which is the right thing to lose, and is why
+      this is still parked rather than blocking
 - [ ] **16 npm advisories in the client, and two of them now ship in the binary.** This item
       used to say "23, all in Metro and the Expo CLI, none of it ships, leave them" — and the
       reason given for leaving them was that `npm audit fix --force` wanted `expo@57`. We are on
@@ -584,7 +773,9 @@ photographs, hit the padlock, tap the upsell, find a disabled button. Unchanged 
 2. **The image-quality trade** — which constraint binds? (§3)
 3. **The Pro dead-end** — raise the free allowance, or build purchasing? (blocking, §4)
 4. **A deployment host.** (blocking, §5)
-5. **`POST /map/sightings`** — add the control, or drop the copy?
+5. **`POST /map/sightings`** — add the control, or drop the copy? The copy is **gone** as of
+   2026-09-29, so this is now only "add the control, or leave it unbuilt". See
+   "Deliberately unbuilt".
 6. **Geocoding**, whenever the neighbourhood boards matter.
 7. **The paw grant period is weekly — 7 paws every 168 hours.** `PAW_GRANT` and
    `PAW_GRANT_WINDOW_HOURS` in `server/src/game/paws.ts` are the only place either number
@@ -600,14 +791,18 @@ photographs, hit the padlock, tap the upsell, find a disabled button. Unchanged 
    partly a measure of spending; lower it toward 1 and the bonus stops being a reason to
    unlock anybody's photo but your own. It is the number that decides whether the paw economy
    has a point beyond generosity.
-9. **What a reveal and a cosmetic cost in paws — both are placeholders with real values in
-   them.** `PAW_REVEAL_COST` in `server/src/game/paws.ts` is **3** and Monochrome's `pawPrice`
-   in `game/shop.ts` is **40**; each is one line, and the reveal price has a mirrored copy in
+9. **What a reveal, a cosmetic and a pin extension cost in paws — all placeholders with real
+   values in them.** `PAW_REVEAL_COST` in `server/src/game/paws.ts` is **3**,
+   `PAW_PIN_EXTENSION_COST` is **2**, and Monochrome's `pawPrice` in `game/shop.ts` is **40**;
+   each is one line, and the reveal and extension prices have mirrored copies in
    `src/constants/game.ts` that `check-paws.ts` will fail loudly about if you change one and
-   not the other. Neither number is researched. They are set so the path can be played with on
-   a device, which is the only way the right numbers get found. What they have to balance: the
-   supply is seven a week, spending is wallet-only, and a wallet is filled by *being given*
-   paws — so the price is really the exchange rate between generosity and getting things.
+   not the other. None of the three is researched. They are set so the path can be played with
+   on a device, which is the only way the right numbers get found. What they have to balance:
+   the supply is seven a week, spending is wallet-only, and a wallet is filled by *being given*
+   paws — so the price is really the exchange rate between generosity and getting things. The
+   extension is priced **below** a reveal on purpose: a reveal buys the player something for
+   themselves, an extension buys other people a pin they can walk to, and a price that forced a
+   choice between the two would mean nobody ever chose the generous one.
 10. **Which filters are paw-unlockable.** The mechanism is built and the default is off:
    `pawPrice: null` on a catalogue row means it cannot be bought with paws, and every entry
    carries that except the one worked example. Adding a filter never makes it buyable by
@@ -617,6 +812,23 @@ photographs, hit the padlock, tap the upsell, find a disabled button. Unchanged 
    you should not loosen: **nothing rank-gated** takes a paw price (it would empty out the
    visible record of having taken photographs), and **Pro never** does (it is the one entry
    that is not cosmetic).
+11. **One paw per photograph, decided 2026-09-29 — and it is the one rule here that was
+   reversed rather than chosen.** The original design allowed any number and argued for it:
+   a paw is a tip rather than a verdict, giving moves nothing ranked, so there is no honest
+   reason to cap how many times somebody may say "this one is good". That reasoning is still
+   sound and it was still the wrong control, because it ignored what the button feels like
+   under a thumb — an uncapped tap has no legible cost, and a player who taps three times has
+   spent nearly half their week without deciding to. `PAW_GIFT_LIMIT_PER_PHOTO` carries the
+   argument. **If you reverse it back**, the unique index has to be dropped and `paw_count`
+   stops meaning "how many people liked this", which is what the card has always implied it
+   was showing.
+12. **Whether the reveal's "post this?" sheet should be the *default* answer rather than a
+   question.** It asks on the way out and defaults to nothing — the photo stays private unless
+   the player says otherwise, because `shared_to_feed` defaults false. The other reading is
+   that a cat-photo game is for showing people cats, and private-by-default is the setting
+   nobody wants but everybody gets. Worth revisiting once there is a feed with strangers in it;
+   do not change it before then, because every photograph in the database was captured under
+   the current promise.
 
 ---
 
@@ -629,7 +841,8 @@ photographs, hit the padlock, tap the upsell, find a disabled button. Unchanged 
   `add constraint` has no `if not exists` — so run each whole and read the error rather than
   re-running if one stops partway
 - Rules with no database under them go in `server/src/game/`, with a `scripts/check-*.ts` beside
-  them. Eleven exist and all run with no project and no key
+  them. **Twelve** exist and all run with no project and no key — `ls server/scripts/check-*.ts`
+  is the only trustworthy count, and this line said eleven for a month after there were twelve
 - Follow `BACKEND.md` §7's conventions. Comments explain **why**, not what
 - **Before concluding something is unused or unwired, grep the whole tree** and compare against a
   working example of the same thing. That is trap 15, and it has been re-learned since

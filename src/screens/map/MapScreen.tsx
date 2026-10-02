@@ -284,10 +284,24 @@ export function MapScreen({ navigation }: Props) {
       {empty && !error ? (
         <View style={[styles.emptySlot, { top: insets.top + 64 }]} pointerEvents="none">
           <View style={styles.emptyCard}>
+            {/*
+              Says which kind of empty this is, because there are two and they used to read the
+              same.
+
+              "No sightings nearby" was shown both when nobody had photographed a cat here and
+              when every pin here had simply aged out — pins last `sightingTtlHours` and nothing
+              on screen said so, so a player whose own captures had expired read an empty map as
+              a broken one. Naming the TTL costs one line and turns a bug report into a fact
+              about how the map works.
+
+              Your own layer cannot hit that case any more: `services/map.ts` exempts the viewer's
+              own pins from the cutoff, so an empty "My photos" means what it says — you have not
+              photographed a cat around here.
+            */}
             <Text style={[text.bodySm, { color: paper.textMuted }]}>
               {layer === 'mine'
-                ? 'None of your photos were taken around here yet.'
-                : 'No sightings nearby. Log the first one.'}
+                ? 'None of your photos were taken around here. Your own pins stay on the map for good.'
+                : `No sightings nearby. Other players' pins come down after ${MAP_CONFIG.sightingTtlHours} hours, so a quiet map is usually a quiet few days rather than an empty neighbourhood.`}
             </Text>
           </View>
         </View>

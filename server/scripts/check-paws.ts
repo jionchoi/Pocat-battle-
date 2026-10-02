@@ -29,9 +29,13 @@ import {
   PAW_GRANT,
   PAW_GRANT_WINDOW_HOURS,
   PAW_GRANT_WINDOW_MS,
+  PAW_GIFT_LIMIT_PER_PHOTO,
+  PAW_PIN_EXTENSION_COST,
+  PAW_PIN_EXTENSION_HOURS,
   PAW_REVEAL_COST,
   canAfford,
   chooseBucket,
+  extendedPinUntil,
   grantResetsAt,
   nextPawCount,
   refuseGift,
@@ -262,6 +266,64 @@ check(
   'not_found'
 );
 
+/*
+ * One paw per photograph, and the order of the refusals matters as much as the rule.
+ *
+ * `already_given` is checked last, after ownership and sharing, so a second tap on a photograph
+ * that has meanwhile been unshared reads as 'not_found' rather than telling the player about a
+ * gift on a photo they can no longer see.
+ */
+check(
+  'a photo you have already given to',
+  refuseGift('me', { ownerId: 'them', sharedToFeed: true }, true),
+  'already_given'
+);
+check(
+  'not-found still wins over already-given',
+  refuseGift('me', null, true),
+  'not_found'
+);
+check(
+  'own-photo still wins over already-given',
+  refuseGift('me', { ownerId: 'me', sharedToFeed: true }, true),
+  'own_photo'
+);
+check('the cap is one', PAW_GIFT_LIMIT_PER_PHOTO, 1);
+
+console.log('\n-- keeping a map pin up --\n');
+
+const pinNow = new Date('2026-09-29T12:00:00.000Z');
+
+/*
+ * A pin that has never been extended buys a week from now. It deliberately does not read
+ * `captured_at`, so extending inside the free TTL window loses whatever was left of it — the
+ * note on `extendedPinUntil` says so, and the alternative makes a pure function need a row.
+ */
+check(
+  'an unextended pin gets a week from now',
+  extendedPinUntil(null, pinNow),
+  '2026-10-06T12:00:00.000Z'
+);
+
+// Paying early must never be worse than paying late, or the app has taught the player to wait.
+check(
+  'a live extension is added to, not reset',
+  extendedPinUntil('2026-10-04T12:00:00.000Z', pinNow),
+  '2026-10-11T12:00:00.000Z'
+);
+
+check(
+  'an expired extension starts again from now',
+  extendedPinUntil('2026-09-01T12:00:00.000Z', pinNow),
+  '2026-10-06T12:00:00.000Z'
+);
+
+check(
+  'a week is what the constant says',
+  PAW_PIN_EXTENSION_HOURS * 3_600_000,
+  new Date(extendedPinUntil(null, pinNow)).getTime() - pinNow.getTime()
+);
+
 console.log('\n-- the photo’s displayed count --\n');
 
 check('a gift adds one', nextPawCount(4, 1), 5);
@@ -287,6 +349,8 @@ for (const [key, ours] of [
   ['grant', PAW_GRANT],
   ['grantWindowHours', PAW_GRANT_WINDOW_HOURS],
   ['revealCost', PAW_REVEAL_COST],
+  ['pinExtensionCost', PAW_PIN_EXTENSION_COST],
+  ['pinExtensionHours', PAW_PIN_EXTENSION_HOURS],
 ] as const) {
   const match = clientSource.match(new RegExp(`${key}:\\s*([\\d_]+)`));
 

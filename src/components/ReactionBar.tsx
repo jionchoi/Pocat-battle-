@@ -240,6 +240,7 @@ const HalfButton = React.memo(function HalfButton({
   count,
   active,
   disabled,
+  inert = false,
   metrics,
   context,
   onPress,
@@ -250,6 +251,15 @@ const HalfButton = React.memo(function HalfButton({
   count: number;
   active: boolean;
   disabled: boolean;
+  /**
+   * Unpressable, but at full strength.
+   *
+   * Distinct from `disabled`, which also dims to 0.5. That dimming says "this is not for you",
+   * which is right for a paw on your own photograph and wrong for one you have already given:
+   * the button is showing something you did, and greying out your own act would read as having
+   * lost it. See `PawButton`.
+   */
+  inert?: boolean;
   metrics: Metrics;
   context: ContextName;
   onPress: () => void;
@@ -284,9 +294,11 @@ const HalfButton = React.memo(function HalfButton({
        * a button that did not register the press.
        */
       delayLongPress={260}
-      disabled={disabled}
+      disabled={disabled || inert}
       accessibilityRole="button"
-      accessibilityState={{ selected: active, disabled }}
+      // `disabled` to a screen reader either way: both mean "there is nothing to press here".
+      // The label is what explains which of the two reasons applies.
+      accessibilityState={{ selected: active, disabled: disabled || inert }}
       accessibilityLabel={accessibilityLabel}
       style={[
         styles.button,
@@ -362,12 +374,16 @@ const Tray = React.memo(function Tray({
         : withTiming(0, { duration: 120 });
   }, [open, reduceMotion, shown]);
 
+  /**
+   * The tray rises and fades in. It does not scale, for the reason `TrayFace` gives at length.
+   *
+   * A scale on this view is worse than one on a single face, because it upscales the whole
+   * subtree — every emoji and every count inside it — and it ran at the same time as the
+   * per-face scale, so the first face was being magnified twice over.
+   */
   const animated = useAnimatedStyle(() => ({
     opacity: shown.value,
-    transform: [
-      { scale: 0.86 + 0.14 * shown.value },
-      { translateY: (1 - shown.value) * 8 },
-    ],
+    transform: [{ translateY: (1 - shown.value) * 8 }],
   }));
 
   const faces = REACTIONS.filter((key) => key !== (myReaction ?? PRIMARY));
@@ -431,9 +447,26 @@ const TrayFace = React.memo(function TrayFace({
       : withTiming(0, { duration: 90 });
   }, [enter, index, open, reduceMotion]);
 
+  /**
+   * Opacity and a rise, never a scale.
+   *
+   * This used to animate `scale: 0.5 + 0.5 * enter.value` on the `Animated.Text` below, and it
+   * made every face arrive blurred. A transform does not re-lay-out text: the glyph is
+   * rasterized once at its layout size and the resulting bitmap is stretched, so scaling *up*
+   * from half size means an emoji drawn at half resolution and magnified. With the overshoot
+   * spring and the 26ms-per-face stagger, that is a visibly soft tray for the better part of a
+   * second, resolving to crisp only as each spring settles at exactly 1 — which is the "blurry
+   * for the first second, then clear" this replaces.
+   *
+   * Emoji are the worst case for it. They are colour bitmap glyphs, so there is no vector to
+   * re-render from at the larger size the way there is for ordinary text on some platforms.
+   *
+   * A rise carries the same "faces spring out of the bar" read, and translation resamples
+   * nothing.
+   */
   const animated = useAnimatedStyle(() => ({
     opacity: enter.value,
-    transform: [{ scale: 0.5 + 0.5 * enter.value }],
+    transform: [{ translateY: (1 - enter.value) * 10 }],
   }));
 
   return (
@@ -493,21 +526,36 @@ const PawButton = React.memo(function PawButton({
 }) {
   const given = usePawStore((s) => s.givenByPhotoId[photoId] ?? 0);
 
+  /**
+   * Given is a finished state, so the control stops being a control.
+   *
+   * A paw is one per photograph — see `PAW_GIFT_LIMIT_PER_PHOTO` — and a button that still
+   * invites a press it will refuse is what made the spam possible to attempt in the first
+   * place. It keeps its highlight and its count, so it still reads as *yours*; it simply has
+   * nothing left to do.
+   *
+   * `active` and `spent` are separate on purpose. The dimming that `disabled` brings with it
+   * is right for somebody else's rule ("not your photo") and wrong for your own completed
+   * act, so the highlight stays at full strength and only the press is gone.
+   */
+  const spent = given > 0;
+
   return (
     <View style={styles.half}>
       <HalfButton
         emoji={PAW_EMOJI}
         count={count}
-        active={given > 0}
+        active={spent}
         disabled={disabled}
+        inert={spent}
         metrics={metrics}
         context={context}
         onPress={onPress}
         accessibilityLabel={
           disabled
             ? `${count} paws. You cannot give paws to your own photo.`
-            : given > 0
-              ? `${count} paws, ${given} from you. Tap to give another.`
+            : spent
+              ? `${count} ${count === 1 ? 'paw' : 'paws'}, including yours. You have given this photo a paw.`
               : `${count} ${count === 1 ? 'paw' : 'paws'}. Tap to give one.`
         }
       />

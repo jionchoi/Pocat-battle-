@@ -5,7 +5,9 @@ import { albumApi, catdexApi, photoApi } from '../api/endpoints';
 import { ALBUM_CONFIG } from '../constants/game';
 import type { Cat, IdentifyChoice, Identification, Photo, Rarity } from '../models';
 import { readPhotos, replacePhotos, deletePhoto as deleteLocalPhoto, writePhoto } from '../services/database';
+import { syncPinExpiryWarning, cancelPinExpiryWarning } from '../lib/pinExpiry';
 import { useAuthStore } from './authStore';
+import { usePawStore } from './pawStore';
 
 /**
  * Album and Cat Dex state, offline-first (README section 10).
@@ -71,6 +73,13 @@ interface AlbumState {
   setShared: (photoId: string, shared: boolean) => Promise<void>;
   setShowcased: (photoId: string, showcased: boolean) => Promise<void>;
   setSharedToMap: (photoId: string, sharedToMap: boolean) => Promise<void>;
+  /**
+   * Pays paws to keep one photograph's pin on the map for another week.
+   *
+   * Answers the new expiry, so the caller can word its confirmation from the value the server
+   * actually wrote rather than from a date computed twice.
+   */
+  extendMapPin: (photoId: string) => Promise<string>;
   remove: (photoId: string) => Promise<void>;
   renameCat: (catId: string, nickname: string, bio?: string) => Promise<void>;
   pinDexPhoto: (catId: string, photoId: string) => Promise<void>;
@@ -418,6 +427,11 @@ export const useAlbumStore = create<AlbumState>((set, get) => ({
     try {
       const { photo } = await photoApi.update(photoId, { sharedToMap });
       await get().upsert(photo);
+
+      // The warning follows the switch: turning the pin off has nothing left to warn about, and
+      // turning it back on needs the notification scheduled again. `syncPinExpiryWarning` reads
+      // `sharedToMap` and does the right thing either way, so both cases are this one call.
+      void syncPinExpiryWarning(photo);
     } catch (err) {
       // Same rollback as `setShared`, and for the sharper version of the same reason: a
       // switch that stayed off after failing to turn off would tell a player their location
@@ -425,6 +439,34 @@ export const useAlbumStore = create<AlbumState>((set, get) => ({
       set(previous);
       throw err;
     }
+  },
+
+  /**
+   * Buys another week of map pin for one photograph.
+   *
+   * **Not optimistic**, unlike almost every other edit on this store, and for the same reason
+   * `setShowcased` is not: the server can refuse it — an empty wallet, or a pin that is switched
+   * off — and this one costs money. Drawing a week the player has not been charged for and then
+   * taking it back would be the app claiming to have spent their paws and then disagreeing.
+   *
+   * The balance the server returns is applied rather than refetched. It is the authoritative
+   * answer from the request that moved it, which is the same rule `usePawGift` follows: one
+   * source of truth for an integer that is money.
+   */
+  extendMapPin: async (photoId) => {
+    const { mapPinUntil, balance } = await photoApi.extendMapPin(photoId);
+
+    usePawStore.getState().apply(balance);
+    set(patchPhoto(get(), photoId, { mapPinUntil }));
+
+    const photo = get().byId(photoId);
+    if (photo) {
+      await writePhoto(photo).catch(() => undefined);
+      // Rescheduled to the new expiry, which is the whole point of having paid.
+      void syncPinExpiryWarning(photo);
+    }
+
+    return mapPinUntil;
   },
 
   remove: async (photoId) => {
@@ -462,6 +504,9 @@ export const useAlbumStore = create<AlbumState>((set, get) => ({
     try {
       await photoApi.remove(photoId);
       await deleteLocalPhoto(photoId);
+      // Nothing left to warn about, and a notification about a deleted photograph would route
+      // to a screen that 404s.
+      void cancelPinExpiryWarning(photoId);
       // Deleting a photo can empty or re-point a Dex entry server-side, so the Dex is
       // refetched rather than patched — guessing the new best shot here would be wrong
       // exactly when it matters.

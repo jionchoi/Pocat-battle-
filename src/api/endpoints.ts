@@ -131,6 +131,19 @@ export const photoApi = {
     }
   ) => api.patch<{ photo: Photo }>(`/photos/${photoId}`, body),
 
+  /**
+   * Pays paws to keep this photograph's pin on the map for another week.
+   *
+   * No body: the price and the length are the server's. Not idempotent — each call charges
+   * again and adds another week to whatever the pin already has — so it must never be retried
+   * automatically on a timeout, which is the one case where a silent retry spends real currency.
+   */
+  extendMapPin: (photoId: string) =>
+    api.post<{ mapPinUntil: string; spent: number; balance: PawBalance }>(
+      `/photos/${photoId}/map-pin`,
+      {}
+    ),
+
   remove: (photoId: string) => api.delete<void>(`/photos/${photoId}`),
 
   /**

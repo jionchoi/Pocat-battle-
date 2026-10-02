@@ -21,8 +21,13 @@ import {
   type FeedCounts,
 } from '../serializers/feedPhoto.js';
 import { emptyReactions } from '../game/community.js';
-import { PAW_REVEAL_COST, canAfford } from '../game/paws.js';
-import { spendFromWallet, walletOf } from './paws.js';
+import {
+  PAW_PIN_EXTENSION_COST,
+  PAW_REVEAL_COST,
+  canAfford,
+  extendedPinUntil,
+} from '../game/paws.js';
+import { spendFromWallet, walletOf, type PawBalance } from './paws.js';
 import { awardForScore, awardXp, type Award } from './progression.js';
 import { xpForRevealingAnother } from '../game/progression.js';
 import { nicknamesFor } from './catNames.js';
@@ -855,6 +860,90 @@ export async function update(userId: string, photoId: string, patch: PhotoPatch)
   if (!data) throw new HttpError(404, 'That photo is not in your album.');
 
   return { photo: serializePhoto(data, await nicknameOf(userId, data)) };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Keeping a pin on the map                                                   */
+/* -------------------------------------------------------------------------- */
+
+export interface PinExtensionResult {
+  /** When the pin now expires, ISO. */
+  mapPinUntil: string;
+  spent: number;
+  balance: PawBalance;
+}
+
+/**
+ * `POST /photos/:photoId/map-pin` — pays paws to keep this photograph's pin on the map.
+ *
+ * ## Why this is not a field on `update`
+ *
+ * Every field there is free and the player owns it outright, which is why the migrations grant
+ * `update` on those four columns to `authenticated`. `map_pin_until` costs money, so it is
+ * service-role only and the write happens here, after the wallet has actually moved. A column a
+ * player could set for themselves would make the price a suggestion — the same reasoning that
+ * keeps the scoring columns off the grant, and the same shape as trap 17.
+ *
+ * ## Only your own, and only a pin that is actually published
+ *
+ * Owner-gated by `ownedPhoto`. Also refused when `shared_to_map` is off: paying to extend a pin
+ * nobody can see is a spend that buys the player nothing, and taking their paws for it would be
+ * the app's fault rather than theirs. The switch is free and the extension is not, so the free
+ * thing has to be on first.
+ *
+ * ## Ordered so a failure is survivable
+ *
+ * The column is written **before** the wallet is charged, which is the ordering `spendFromWallet`
+ * documents and asks its callers for: a failure between the two leaves a player with a week of
+ * pin they were not charged for. The reverse leaves them charged for nothing, which is the one
+ * outcome worth engineering against.
+ */
+export async function extendMapPin(
+  userId: string,
+  photoId: string
+): Promise<PinExtensionResult> {
+  const row = await ownedPhoto(userId, photoId);
+
+  if (!row.shared_to_map) {
+    throw new HttpError(
+      409,
+      'This photo is not on the map. Put it on the map first, which is free.',
+      'not_on_map'
+    );
+  }
+
+  /*
+   * Affordability is checked here as well as inside `spendFromWallet`, for the reason the note
+   * there gives: this refusal can name the price and the thing being bought, where the generic
+   * one cannot. The second check is not redundant — the paws may be gone by the time it runs.
+   */
+  const wallet = await walletOf(userId);
+
+  if (!canAfford(wallet, PAW_PIN_EXTENSION_COST)) {
+    throw new HttpError(
+      409,
+      `Keeping this pin costs ${PAW_PIN_EXTENSION_COST} paws and your wallet has ${wallet}.`,
+      'no_paws'
+    );
+  }
+
+  const until = extendedPinUntil(row.map_pin_until ?? null);
+
+  const { error } = await supabase
+    .from('photos')
+    .update({ map_pin_until: until })
+    .eq('id', photoId)
+    .eq('owner_id', userId);
+
+  if (error) throw error;
+
+  const spend = await spendFromWallet(userId, {
+    cost: PAW_PIN_EXTENSION_COST,
+    reason: 'pin_extension',
+    photoId,
+  });
+
+  return { mapPinUntil: until, spent: spend.spent, balance: spend.balance };
 }
 
 /**

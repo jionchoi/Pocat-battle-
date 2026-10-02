@@ -118,6 +118,32 @@ router.post(
   pawsController.give
 );
 
+/**
+ * Keeps this photograph's pin on the map past the ordinary TTL, for paws.
+ *
+ * On `/photos` rather than `/map` because the thing being changed is a photograph and the
+ * ownership check is the photograph's — `/map` serves a viewport and owns no rows.
+ *
+ * A POST rather than a PATCH on the photo, and that is the point of it having its own route:
+ * `PATCH /photos/:id` is the free, owner-writable fields, and `map_pin_until` is neither free nor
+ * grantable to `authenticated`. Folding a priced write into that handler would put a spend behind
+ * the same door as editing a caption.
+ *
+ * Not idempotent, deliberately, which is the other reason it is a POST: each call buys another
+ * week and charges again. `extendedPinUntil` adds to whatever the pin already has, so paying
+ * early is never worse than paying late.
+ *
+ * `writeLimit` rather than `costlyLimit`, matching the paw route: this spends the player's own
+ * currency and makes no model call.
+ */
+router.post(
+  '/:photoId/map-pin',
+  authenticate,
+  writeLimit,
+  uuidParam('photoId'),
+  photosController.extendMapPin
+);
+
 /** Removes the row, the object in the bucket, and repairs any Dex entry pointing at it. */
 router.delete(
   '/:photoId',

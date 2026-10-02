@@ -10,7 +10,7 @@ import { CaptureOverlay } from '../../components/CaptureOverlay';
 import { CaptureFilterLayer } from '../../components/CaptureFilterLayer';
 import { ScoringOverlay } from '../../components/ScoringOverlay';
 import { Button } from '../../components/Button';
-import { showToast } from '../../components/Toast';
+import { ToastHost, showToast } from '../../components/Toast';
 import { useCameraPermission } from '../../hooks/useCameraPermission';
 import { useLocation } from '../../hooks/useLocation';
 import { useOwnedFilters } from '../../hooks/useOwnedFilters';
@@ -691,6 +691,16 @@ export function CaptureScreen() {
           onClose={close}
         />
       ) : null}
+
+      {/*
+        This screen's own toast surface, and it is last so it draws over the viewfinder.
+
+        Needed because this screen is a `fullScreenModal` — a native view controller above the
+        React root — so the host in `App.tsx` renders *behind* it. Without this, "Golden Hour is
+        locked." was raised the moment the rail slid back, spent its five seconds invisible, and
+        surfaced only once the camera was dismissed. See the note on `hosts` in `Toast.tsx`.
+      */}
+      <ToastHost />
     </View>
   );
 }

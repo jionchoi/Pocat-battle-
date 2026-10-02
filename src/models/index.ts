@@ -171,6 +171,19 @@ export interface Photo {
    */
   sharedToMap: boolean;
 
+  /**
+   * When this photograph's map pin stops being published, or null for "the ordinary TTL".
+   *
+   * Null is the usual state and does **not** mean expired: an unextended pin is live for
+   * `MAP_CONFIG.sightingTtlHours` from `capturedAt`, which is the rule for every photograph
+   * nobody has paid to keep up. A date here is an override bought with paws, and it is always
+   * later than that window would have ended.
+   *
+   * Owner-only — it is absent from the feed serialization, because when somebody else's pin
+   * comes down is not a reader's business. See `serializers/photo.ts`.
+   */
+  mapPinUntil: string | null;
+
   /* --- the community layer --- */
 
   /**

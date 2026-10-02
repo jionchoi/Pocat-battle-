@@ -33,7 +33,7 @@ import { CircleButton } from '../../components/CircleButton';
 import { ScoreBreakdown } from '../../components/ScoreBreakdown';
 import { BottomSheet, ConfirmSheet } from '../../components/BottomSheet';
 import { TextField } from '../../components/TextField';
-import { showToast } from '../../components/Toast';
+import { ToastHost, showToast } from '../../components/Toast';
 import { photoApi } from '../../api/endpoints';
 import { AlbumFullSheet } from '../../components/AlbumFullSheet';
 import { IdentifySheet } from '../../components/IdentifySheet';
@@ -178,6 +178,15 @@ export function ScoreResultScreen() {
     null
   );
   const [confirmingRetake, setConfirmingRetake] = useState(false);
+  /** The "post this?" sheet, raised on the way out. See `leaveOrAsk`. */
+  const [askingToPost, setAskingToPost] = useState(false);
+  /**
+   * Whether the feed question has been put once already.
+   *
+   * Never reset. Asking again on a second back-press would make the door out of this screen
+   * conditional on answering, which is exactly what the back arrow is documented not to be.
+   */
+  const [postAsked, setPostAsked] = useState(false);
   /**
    * Set once the player has answered — or declined to answer — which cat this is.
    *
@@ -254,6 +263,44 @@ export function ScoreResultScreen() {
 
     resetCapture();
   }, [navigation, resetCapture]);
+
+  /**
+   * Leaving, but asking about the feed first — once.
+   *
+   * ## Why this asks at all
+   *
+   * Because a reveal looks like a publication. The player watched a score land on a full-bleed
+   * photograph with a tier crest and badges on it, which is the visual grammar of something being
+   * posted, and `shared_to_feed` defaults to **false** — so the photo is private and nothing on
+   * the screen ever said so. "Share to feed" sitting beside "Save to Album" reads as a way to
+   * share it *again*, somewhere else, rather than as the only thing that publishes it at all. A
+   * player who backed out believing they had posted would be wrong, and would not find out.
+   *
+   * ## Why on the way out, and not as a sheet over the reveal
+   *
+   * The screen's own rule is that a player who only wanted the number is not made to answer
+   * anything — the back arrow is documented as the door that costs nothing. A sheet raised the
+   * moment the score appears would break that and would land on top of the payoff the player
+   * waited four seconds for.
+   *
+   * So the question is asked where it becomes real: at the point of leaving, which is the last
+   * moment the answer can still be given. It is skipped entirely when the player has already
+   * decided — by posting, or by pressing Save to Album, which *is* the private answer — so the
+   * only person who sees it is the one who would otherwise have left without knowing.
+   *
+   * Asked once per capture. `postAsked` is never reset, so declining and pressing back again
+   * leaves immediately; a question that returns every time is a dialog the player learns to
+   * dismiss without reading.
+   */
+  const leaveOrAsk = useCallback(() => {
+    if (!result || postAsked || result.photo.sharedToFeed) {
+      done();
+      return;
+    }
+
+    setPostAsked(true);
+    setAskingToPost(true);
+  }, [done, postAsked, result]);
 
   /**
    * "Save to Album" — the keep-it-and-leave action.
@@ -867,6 +914,25 @@ export function ScoreResultScreen() {
           the same split: an album for the private half, the outward arrow — the same
           arrow every other share in the app uses — for the public one.
         */}
+        {/*
+          What is true right now, said before the two buttons that change it.
+
+          `shared_to_feed` defaults to false, so a fresh capture is private — and nothing on this
+          screen used to say so. A reveal has the look of a publication: a score, a tier crest and
+          badges over a full-bleed photograph. With "Share to feed" next to "Save to Album" and no
+          statement of the current state, the honest reading is that the photo is already out and
+          that button shares it somewhere *else*.
+
+          One line fixes the misreading, and it is a statement rather than a warning: this is not
+          a problem to fix, it is the setting the player is in. `leaveOrAsk` covers the player who
+          leaves without reading it.
+        */}
+        <Text style={[text.caption, styles.visibilityNote]}>
+          {photo.sharedToFeed
+            ? 'This photo is in the feed.'
+            : 'Only you can see this photo right now.'}
+        </Text>
+
         <View style={styles.actions}>
           <View style={styles.actionCell}>
             <Button
@@ -1004,11 +1070,43 @@ export function ScoreResultScreen() {
       */}
       <CircleButton
         Glyph={ArrowLeft}
-        onPress={done}
+        onPress={leaveOrAsk}
         context="arena"
         accessibilityLabel="Back to the map"
-        accessibilityHint="Leaves this photo in your album without sharing it"
+        accessibilityHint="Leaves this photo in your album. Asks first whether you want it in the feed."
         style={[styles.back, { top: insets.top + spacing.xs }]}
+      />
+
+      {/*
+        The feed question, asked once on the way out. `leaveOrAsk` carries the argument for why
+        it is here rather than over the reveal.
+
+        Worded as a state plus an offer, not as a warning. "Only you can see this" is the fact a
+        player leaving this screen most often has wrong, and it is the first thing the sheet says;
+        posting is then a thing they may choose rather than a thing they failed to do.
+
+        Cancelling is a real answer and leaves — the label says so. A sheet whose cancel put the
+        player back on the reveal would make this a checkpoint, and the back arrow is documented
+        as a door that costs nothing.
+      */}
+      <ConfirmSheet
+        visible={askingToPost}
+        context="arena"
+        title="Post this to the feed?"
+        body={`Right now only you can see this photo — it is saved in your album. Posting it puts it in the community feed, where other players can react to it and give it paws.${
+          caption.trim().length > 0 ? ' Your caption goes with it.' : ''
+        }`}
+        confirmLabel="Post to feed"
+        cancelLabel="Keep it private"
+        busy={sharing}
+        onConfirm={() => {
+          setAskingToPost(false);
+          void shareToFeed();
+        }}
+        onCancel={() => {
+          setAskingToPost(false);
+          done();
+        }}
       />
 
       <ConfirmSheet
@@ -1104,6 +1202,14 @@ export function ScoreResultScreen() {
         onChoose={(choice) => void chooseCat(choice)}
         onDismiss={() => setIdentifyResolved(true)}
       />
+
+      {/*
+        This screen's own toast surface, for the same reason the camera has one: `ScoreResult`
+        is a `fullScreenModal`, so the root host in `App.tsx` draws behind it and every toast
+        raised here — a failed caption, a pinned Dex tile, a refused paw — was invisible until
+        the screen was dismissed. See the note on `hosts` in `Toast.tsx`.
+      */}
+      <ToastHost />
     </View>
   );
 }
@@ -1485,12 +1591,24 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     color: arena.textFaint,
   },
+  /**
+   * The current visibility, immediately above the pair of buttons that changes it.
+   *
+   * Takes the `marginTop: spacing.xxl` that used to open the actions block, so the gap before
+   * the two decisions is unchanged and this line reads as their caption rather than as one more
+   * fact in the list above. `textFaint` would be too quiet for something a player is being
+   * corrected about, so it sits at the muted weight the XP line uses.
+   */
+  visibilityNote: {
+    alignSelf: 'stretch',
+    marginTop: spacing.xxl,
+    marginBottom: spacing.xs,
+    color: arena.textMuted,
+    textAlign: 'center',
+  },
   actions: {
     alignSelf: 'stretch',
     flexDirection: 'row',
-    // Sits well clear of the XP line above it: the two decisions are the bottom third of
-    // this screen, not the next item in a list of facts about the photo.
-    marginTop: spacing.xxl,
     gap: spacing.xs,
   },
   /**

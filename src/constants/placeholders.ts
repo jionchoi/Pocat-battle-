@@ -159,6 +159,9 @@ function placeholderPhoto(index: number): PhotoWithAuthor {
     sharedToFeed: true,
     showcased: false,
     sharedToMap: true,
+    // Never extended, which is what almost every real photograph says here. The design feed has
+    // no owner controls on it, so no screen ever prices anything against this.
+    mapPinUntil: null,
     communityScore: 400 + index * 31,
     viewCount: 1_200 - index * 74,
     featured: false,

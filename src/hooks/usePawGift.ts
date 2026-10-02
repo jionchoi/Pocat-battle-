@@ -3,7 +3,7 @@ import { useCallback } from 'react';
 import { pawApi, type PawBucket } from '../api/endpoints';
 import { showToast } from '../components/Toast';
 import { PAW_CONFIG } from '../constants/game';
-import { isNoPaws, useShopRoute } from './useShopRoute';
+import { isAlreadyGiven, isNoPaws, useShopRoute } from './useShopRoute';
 import { isPlaceholderId } from '../constants/placeholders';
 import type { Photo } from '../models';
 import { usePawStore } from '../store/pawStore';
@@ -57,6 +57,24 @@ export function usePawGift<T extends Photo>(
   return useCallback(
     (photo: T) => {
       const store = usePawStore.getState();
+
+      /*
+       * One paw per photograph, checked before anything is spent.
+       *
+       * The server enforces it — `paw_ledger_one_gift_per_photo`, and the `already_given`
+       * refusal below is this same rule arriving from the other side — but the check has to be
+       * here too, and not only to save a request. A spammed button used to *succeed*: every tap
+       * fired its own request, all of them read the same balance server-side before any had
+       * written, and eleven gifts came out of a grant of seven. The taps after the first now
+       * cost nothing and do nothing, which is what a button whose job is already done should do.
+       *
+       * Silent, deliberately. The count under the paw already shows it was given and the button
+       * already draws itself as given, so a toast saying "you did this" on every extra tap would
+       * be the app arguing with a player who can see the state perfectly well. A refusal only
+       * earns a sentence when it explains something the screen does not.
+       */
+      if (store.given(photo.id) > 0) return;
+
       const bucket = store.spend(photo.id);
 
       if (!bucket) {
@@ -120,7 +138,19 @@ export function usePawGift<T extends Photo>(
            * the server knew better — and it should not look like a failure just because the
            * server was the one to notice. Red is for things that actually broke.
            */
-          if (isNoPaws(err)) {
+          if (isAlreadyGiven(err)) {
+            /*
+             * This photograph already has a paw from this player, and this device did not know
+             * — a gift from another device, or a reinstall that cleared `givenByPhotoId`.
+             *
+             * So the local count is *put back* rather than rolled back to zero: the server has
+             * just confirmed a gift exists, and the button should draw itself as given from here
+             * on instead of inviting a tap that will be refused again. Neutral rather than red,
+             * because nothing broke and nothing was lost.
+             */
+            usePawStore.getState().markGiven(photo.id);
+            showToast(err.message, 'neutral', { durationMs: PAW_CONFIG.giftToastMs });
+          } else if (isNoPaws(err)) {
             showToast(err.message, 'neutral', {
               action: { label: 'Shop', onPress: openShop },
               durationMs: PAW_CONFIG.giftToastMs,

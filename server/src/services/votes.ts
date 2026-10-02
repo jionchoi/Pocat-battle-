@@ -41,7 +41,39 @@ export async function vote(userId: string, photoId: string, reaction: Reaction) 
       { onConflict: 'photo_id,voter_id' }
     );
 
-  if (error) throw error;
+  if (error) {
+    /*
+     * A check-constraint violation here means one thing only: the database's
+     * `votes_reaction_known` predicate is narrower than `REACTIONS`, so this build is offering a
+     * reaction the column will not hold. That is `2026-08-28_five_reactions.sql` not having been
+     * run — 🥹 and 🔥 are the two it adds.
+     *
+     * Named rather than left as a bare 500, because the symptom is otherwise unreadable from
+     * either side: the client draws five faces, three of them work, and the other two answer
+     * "We could not record that reaction" with nothing anywhere saying why. This is the one
+     * failure in the API that is *purely* a migration that has not been applied, and it should
+     * say so in the log the first time somebody taps it rather than on the day somebody thinks
+     * to read the constraint by hand.
+     *
+     * 23514 is `check_violation`. The player still gets a neutral failure — there is nothing they
+     * can do about it — but the operator gets the sentence that ends the search.
+     */
+    if ((error as { code?: string }).code === '23514') {
+      console.error(
+        `[votes] the database rejected the reaction '${reaction}'. ` +
+          'votes_reaction_known is narrower than REACTIONS in game/community.ts — run ' +
+          'migrations/2026-08-28_five_reactions.sql.'
+      );
+
+      throw new HttpError(
+        503,
+        'That reaction is not available yet. The other faces still work.',
+        'reaction_unavailable'
+      );
+    }
+
+    throw error;
+  }
 
   return recount(photo.id, photo.owner_id, userId);
 }

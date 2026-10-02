@@ -33,6 +33,17 @@ export interface PhotoRow {
   shared_to_feed: boolean;
   showcased: boolean;
   shared_to_map: boolean;
+
+  /**
+   * Paw-funded override for the map pin TTL, added by the 2026-09-29 migration.
+   *
+   * Optional *and* nullable, and the two mean different things. Absent is a row selected before
+   * the migration ran, or one built by hand in a check; null is a real row that has never been
+   * extended. Both serialize identically, because an unextended pin and a pin from before
+   * extensions existed are the same photograph as far as the map is concerned.
+   */
+  map_pin_until?: string | null;
+
   /*
    * The community layer, added by the 2026-08-12 migration.
    *
@@ -136,6 +147,16 @@ export function serializePhoto(
      * a different file and a different audience, and it is the one that has to coarsen.
      */
     sharedToMap: row.shared_to_map,
+
+    /*
+     * When the pin stops being published, or null for "the ordinary TTL decides it".
+     *
+     * Sent to the owner alone, which is this serializer's whole audience. It is the value the
+     * "keep this pin" control is priced against and the one the expiry warning is scheduled
+     * from, and nobody else has a use for it: a reader looking at a pin can see that it is
+     * there, and when it will go is the owner's business.
+     */
+    mapPinUntil: row.map_pin_until ?? null,
 
     /*
      * Real now, where they used to be hard-coded zeroes waiting on the community migration.

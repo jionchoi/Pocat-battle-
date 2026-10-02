@@ -65,6 +65,25 @@ export async function reveal(req: Request, res: Response, next: NextFunction) {
   }
 }
 
+/**
+ * Pays paws to keep this photograph's pin on the map for another week.
+ *
+ * No body, like the paw route: the price and the length are the server's, not a number the
+ * client may propose. A client that could send either would be a client that could set them.
+ */
+export async function extendMapPin(req: Request, res: Response, next: NextFunction) {
+  try {
+    const result = await photoService.extendMapPin(
+      req.user!.id,
+      req.params['photoId'] as string
+    );
+
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
 /** One photo of the caller's own. 404 for anything else, including somebody else's. */
 export async function detail(req: Request, res: Response, next: NextFunction) {
   try {

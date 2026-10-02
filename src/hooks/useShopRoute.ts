@@ -44,3 +44,15 @@ export function useShopRoute(): () => void {
 export function isNoPaws(err: unknown): err is ApiRequestError {
   return err instanceof ApiRequestError && err.code === 'no_paws';
 }
+
+/**
+ * The per-photograph paw cap, refused server-side.
+ *
+ * Distinguished from every other 409 because it is not a failure and it is not a dead end:
+ * the gift the player is asking for already exists. It needs no route to the shop — there is
+ * nothing to buy that would help — so it gets a plain neutral toast and, more usefully, the
+ * button gets marked as given so it stops asking. See `usePawGift`.
+ */
+export function isAlreadyGiven(err: unknown): err is ApiRequestError {
+  return err instanceof ApiRequestError && err.code === 'already_given';
+}

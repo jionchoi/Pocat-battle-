@@ -65,8 +65,37 @@ interface ToastItem {
 
 type Listener = (item: ToastItem) => void;
 
-let listener: Listener | null = null;
+/**
+ * Every mounted host, oldest first, and the last one wins.
+ *
+ * ## Why this is a stack and not one slot
+ *
+ * It was one slot, and that made toasts raised over the camera invisible. `Capture` and
+ * `ScoreResult` are `presentation: 'fullScreenModal'` in `RootNavigator`, which on iOS is a
+ * separate native view controller presented **above** the React root — so the single host in
+ * `App.tsx`, a sibling of `<RootNavigator />`, rendered underneath it. `zIndex: 100` cannot
+ * help: the two views are not in the same hierarchy for it to order them within.
+ *
+ * The symptom was not a missing toast but a late one. "Golden Hour is locked." fired the moment
+ * the rail slid back, sat invisible behind the camera for its five seconds, and appeared the
+ * instant the modal was dismissed — so the banner looked like it belonged to the screen the
+ * player had just arrived at, about a filter they were no longer touching.
+ *
+ * So a modal screen mounts its own host inside its own tree, and the newest host is the one
+ * `showToast` delivers to. Newest rather than all of them: two hosts showing the same toast at
+ * two different depths is the same message drawn twice.
+ */
+const hosts: Listener[] = [];
 let nextId = 1;
+
+function addHost(listener: Listener): () => void {
+  hosts.push(listener);
+
+  return () => {
+    const at = hosts.indexOf(listener);
+    if (at !== -1) hosts.splice(at, 1);
+  };
+}
 
 /** How long a toast with nothing to press stays up. */
 const DEFAULT_DURATION = 3_200;
@@ -77,7 +106,7 @@ export function showToast(
   tone: ToastTone = 'neutral',
   options: ToastOptions = {}
 ): void {
-  listener?.({
+  hosts[hosts.length - 1]?.({
     id: nextId++,
     message,
     tone,
@@ -86,6 +115,13 @@ export function showToast(
   });
 }
 
+/**
+ * A toast surface.
+ *
+ * One is mounted at the root in `App.tsx`. Any screen presented as a native modal needs its
+ * own — see the note on `hosts` — and mounts it as the **last child** of its tree, so it draws
+ * over that screen's own content as well as over the navigator below it.
+ */
 export function ToastHost() {
   const [item, setItem] = useState<ToastItem | null>(null);
   const insets = useSafeAreaInsets();
@@ -103,13 +139,13 @@ export function ToastHost() {
   }, [progress, reduceMotion]);
 
   useEffect(() => {
-    listener = (next) => {
+    const remove = addHost((next) => {
       if (dismissTimer.current) clearTimeout(dismissTimer.current);
       setItem(next);
-    };
+    });
 
     return () => {
-      listener = null;
+      remove();
       if (dismissTimer.current) clearTimeout(dismissTimer.current);
     };
   }, []);

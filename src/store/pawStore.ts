@@ -77,6 +77,16 @@ export interface PawState {
    */
   refund: (photoId: string, bucket: PawBucket) => void;
 
+  /**
+   * Records that this photograph has a paw from this player, without spending one.
+   *
+   * For the `already_given` refusal alone: the server has just said a gift exists that this
+   * device did not know about — given from another device, or lost when `givenByPhotoId` was
+   * cleared by a reinstall. Marking it stops the button offering a tap that will be refused
+   * again, and it must not touch either balance, because nothing was spent here.
+   */
+  markGiven: (photoId: string) => void;
+
   given: (photoId: string) => number;
 }
 
@@ -228,6 +238,23 @@ export const usePawStore = create<PawState>((set, get) => ({
         },
         wallet: bucket === 'wallet' ? state.wallet + 1 : state.wallet,
         givenByPhotoId,
+      };
+
+      persist(next);
+      return next;
+    });
+  },
+
+  markGiven: (photoId) => {
+    set((state) => {
+      // Already marked is the ordinary case for a refusal this device disagreed with; leaving
+      // the count alone keeps this idempotent rather than counting the same gift twice.
+      if ((state.givenByPhotoId[photoId] ?? 0) > 0) return state;
+
+      const next: Persisted = {
+        grant: state.grant,
+        wallet: state.wallet,
+        givenByPhotoId: { ...state.givenByPhotoId, [photoId]: 1 },
       };
 
       persist(next);
